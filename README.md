@@ -59,7 +59,7 @@ Dynamic functions possible with `slapd-perl-dynldif` are:
 1. Attribute values can expand to value of other entries and attributes
 1. Attribute values can expand to value of another SEARCH
 1. Attribute values can evaluate Perl code
-1. Returned entries can be appened with additional attributes or values in various ways
+1. Returned entries can be appended with additional attributes or values in various ways
 
 ## Configuration Reference
 
@@ -79,7 +79,7 @@ The first four lines are required by `slapd` and its `back-perl` backend
 to configure the suffix and initialize DynLDIF.
 
 The last two lines are required by the DynLDIF backend. The value of
-`treesufix` must be equal to `suffix`.
+`treeSuffix` must be equal to `suffix`.
 This small duplication cannot
 be avoided because `suffix` directive is consumed by `slapd` and is not
 passed onto our backend.
@@ -431,7 +431,7 @@ entryAppend  dn          "^cn=default,ou=networks"         \
 
 ##### exp MATCH_REGEX NON_MATCH_REGEX
 
-Specify regexes that each entry DN must and must not match respectively, to have
+Specify regexes that each attribute name must and must not match respectively, to have
 overlay "exp" run on its attributes.
 
 The "exp" overlay enables expansion into values of other attributes, in the
@@ -441,7 +441,7 @@ Example which always matches, and so enables the `exp` overlay: `exp  .   ^$`
 
 ##### file MATCH_REGEX NON_MATCH_REGEX
 
-Specify regexes that each entry DN must and must not match respectively, to have
+Specify regexes that each attribute name must and must not match respectively, to have
 overlay "file" run on its attributes.
 
 The "file" overlay enables expansion into values of on-disk files, always
@@ -451,7 +451,7 @@ Example: `file  .   ^$`
 
 ##### find MATCH_REGEX NON_MATCH_REGEX
 
-Specify regexes that each entry DN must and must not match respectively, to have
+Specify regexes that each attribute name must and must not match respectively, to have
 overlay "find" run on its attributes.
 
 The "find" overlay enables internal re-invocation of the search function, 
@@ -501,15 +501,10 @@ OPTION can be "cache", "prefix" or "if".
 
 	In such cases, operations of complexity O(n) are reduced to O(1) level.
 
-	Syntax is the same as listed under "cacheRead", and 1o is again the
+	Syntax is the same as listed under "cacheRead", and 1 is again the
 	overall best setting.
 
-	NOTE: due to deficiencies in Memoize::Expire module, time- and
-	uses-based methods of expiry do not work correctly when caching non-scalar
-	values (such as multiple values for an attribute). It is therefore suggested
-	to always use the number-of-operations cache (like 1o).
-
-	Example: cache 1o
+	Example: cache 1
 
 	prefix PREFIX - generic prefix option, used where applicable. Currently
 	only the "file" overlay honors it, where it is a prefix to prepend on
@@ -522,7 +517,7 @@ OPTION can be "cache", "prefix" or "if".
 
 ##### perl MATCH_REGEX NON_MATCH_REGEX
 
-Specify regexes that each entry DN must and must not match respectively, to have
+Specify regexes that each attribute name must and must not match respectively, to have
 overlay "perl" run on its attributes.
 
 By default, Perl overlay is disabled as it is in fact an interface for
@@ -595,7 +590,7 @@ Example 1:
 
 searchSubst  base        "^ou=dhcp$"                       \
              filter      "^\\(&\\(objectClass=dhcpHost\\)\\(dhcpHWAddress=ethernet [\\dabcdef:]+\\)\\)$" \
-             -&gt;                                            \
+             ->                                            \
              base   .+   ou=clients
 
 
@@ -608,9 +603,9 @@ Example 2:
 searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
              scope       "^1$"                             \
              filter      "^\\(objectClass=\\*\\)$"         \
-             -&gt;                                            \
+             ->                                            \
              base   .+   "ou=clients"                      \
-             filter .+   "(&amp;(objectClass=dhcpSubnet)(!(cn=default)))" \
+             filter .+   "(&(objectClass=dhcpSubnet)(!(cn=default)))" \
              scope  .+   2
 ```
 
