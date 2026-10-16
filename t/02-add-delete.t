@@ -53,6 +53,8 @@ subtest 'entry validation' => sub {
 	add_ok( $v, "dn: cn=d,ou=hosts,$SUFFIX\nobjectClass: device\ncn: d\nl: a\nl: A\n",
 		LDAP_TYPE_OR_VALUE_EXISTS, 'duplicate values');
 	is( $v->add( ''), LDAP_PROTOCOL_ERROR, 'no entry');
+	is( $v->add( "objectClass: device\ncn: x\n"), LDAP_OPERATIONS_ERROR, 'no DN');
+	warnings_like( qr/^LDIF Load Error: First line of LDIF entry does not begin with "dn:"$/);
 	ok( !-e data_file( $dir, "cn=x,ou=hosts,$SUFFIX"), 'nothing stored');
 	no_warnings();
 };

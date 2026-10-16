@@ -2351,20 +2351,13 @@ sub dn2leaf {
 
 	if( $fh and $opts{entry}) {
 		my $ldif= new Net::LDAP::LDIF $fh;
+		$entry= eval { $ldif->read_entry }; # (Dies on some errors)
 
-		if( $ldif->error) {
-			warn 'LDIF Load Error: '.$ldif->error.': '.$ldif->error_lines;
-
-			unless( flock $fh, LOCK_UN) {
-				warn "Can't flock_UN '$file' ($!)\n";
-			}
-			return LDAP_OPERATIONS_ERROR
-		}
-
-		$entry= $ldif->read_entry;
-
-		unless( $entry) {
-			warn "No error but also no LDIF data in '$file'; correct manually.\n";
+		my $err= $@ || ( $ldif->error && $ldif->error. ': '. $ldif->error_lines);
+		if( $err or !$entry) {
+			$err=~ s/ at \S+ line \d+.*//s if $err;
+			warn $err ? "Invalid LDIF in '$file' ($err); correct manually.\n" :
+				"No LDIF data in '$file'; correct manually.\n";
 			return LDAP_OPERATIONS_ERROR
 		}
 
@@ -2975,10 +2968,11 @@ sub ldif2e {
 	# Turn $ldif into an entry object right away.
 	open my $fh, '<', $ldifref;
 	my $input= new Net::LDAP::LDIF $fh;
-	my $entry= $input->read_entry;
+	my $entry= eval { $input->read_entry }; # (Dies on some errors)
 
-	if( $input->error) {
-		warn 'LDIF Load Error: '.$input->error.': '.$input->error_lines;
+	if( $@ or $input->error) {
+		( my $err= $@ || $input->error. ': '. $input->error_lines)=~ s/ at \S+ line \d+.*//s;
+		warn "LDIF Load Error: $err\n";
 		return LDAP_OPERATIONS_ERROR
 	}
 
