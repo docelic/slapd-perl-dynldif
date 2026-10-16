@@ -26,17 +26,28 @@ use Net::LDAP::Constant qw/LDAP_INVALID_SYNTAX LDAP_INVALID_DN_SYNTAX/;
 use Net::LDAP::Constant qw/LDAP_NOT_ALLOWED_ON_NONLEAF LDAP_FILTER_ERROR/;
 use Net::LDAP::Constant qw/LDAP_INVALID_CREDENTIALS LDAP_UNWILLING_TO_PERFORM/;
 use Net::LDAP::Constant qw/LDAP_TIMELIMIT_EXCEEDED LDAP_SIZELIMIT_EXCEEDED/;
+use Net::LDAP::Constant qw/LDAP_COMPARE_TRUE LDAP_COMPARE_FALSE/;
+use Net::LDAP::Constant qw/LDAP_NO_SUCH_ATTRIBUTE LDAP_TYPE_OR_VALUE_EXISTS/;
+use Net::LDAP::Constant qw/LDAP_NOT_ALLOWED_ON_RDN LDAP_NAMING_VIOLATION/;
+use Net::LDAP::Constant qw/LDAP_OBJECT_CLASS_VIOLATION LDAP_PROTOCOL_ERROR/;
+use Net::LDAP::Constant qw/LDAP_INSUFFICIENT_ACCESS/;
 use Net::LDAP::LDIF     qw//;
 use Net::LDAP::Schema   qw//;
 use Net::LDAP::Filter   qw//;
-use Net::LDAP::FilterMatch qw//;
+# (Not 'qw//': import() selects the installed approximate matching modules)
+use Net::LDAP::FilterMatch;
+use Net::LDAP::Entry    qw//;
+use Net::LDAP::Util     qw/escape_filter_value/;
 use Storable            qw/freeze nstore retrieve/;
+use Digest::SHA         qw/sha1 sha256 sha384 sha512/;
+use Digest::MD5         qw/md5/;
+use MIME::Base64        qw/decode_base64/;
 use File::Path          qw/rmtree mkpath/;
 use Fcntl               qw/:flock/;
 use Net::LDAP           qw//;
 use Text::CSV_XS        qw//;
-use Memoize::Expire     qw//;
-use List::MoreUtils     qw/any firstidx/;
+use List::MoreUtils     qw/any all firstidx/;
+use Scalar::Util        qw/reftype/;
 
 use subs                qw/p pd pc pcd po pod/;
 
