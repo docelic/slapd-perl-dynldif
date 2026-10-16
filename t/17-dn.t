@@ -9,7 +9,7 @@ use lib "$FindBin::Bin/lib";
 use Test::More;
 use DynLDIFTest;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_INVALID_DN_SYNTAX LDAP_NAMING_VIOLATION
-	LDAP_ALREADY_EXISTS/;
+	LDAP_ALREADY_EXISTS LDAP_UNWILLING_TO_PERFORM/;
 
 my $H= "ou=hosts,$SUFFIX";
 
@@ -135,6 +135,21 @@ subtest 'invalid DNs' => sub {
 	warnings_like( qr/Invalid or non-normalized DN/);
 	is( $v->modrdn( "cn=testuser,ou=groups,$SUFFIX", 'cn', 1), LDAP_INVALID_DN_SYNTAX,
 		'modrdn to invalid RDN');
+	no_warnings();
+};
+
+subtest 'RDNs too long for a file name' => sub {
+	my( $v, $dir)= new_dynldif();
+	my $ok= 'a' x 200;
+	add_ok( $v, "dn: cn=$ok,$H\nobjectClass: device\ncn: $ok\n", LDAP_SUCCESS, '200 characters');
+	for my $long( 'a' x 300, '%' x 100) {
+		add_ok( $v, "dn: cn=$long,$H\nobjectClass: device\ncn: $long\n",
+			LDAP_UNWILLING_TO_PERFORM, length( $long). " characters ($long)");
+		warnings_like( qr/RDN too long for a file name/);
+	}
+	is( $v->modrdn( "cn=$ok,$H", 'cn='. 'b' x 300, 1), LDAP_UNWILLING_TO_PERFORM, 'modrdn');
+	warnings_like( qr/RDN too long for a file name/);
+	ok( -e data_file( $dir, "cn=$ok,$H"), 'entry kept');
 	no_warnings();
 };
 

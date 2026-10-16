@@ -2215,6 +2215,16 @@ sub dn2leaf {
 	my @rdns= reverse( split ',', $dn);
 	my @paths= $this->rdns2paths( @rdns);
 
+	# File names (with extension and suffix of temporary files) must fit
+	# the usual limit of 255 bytes
+	if( $opts{writeop}) {
+		my $max= 255- length( $this->{extension})- length( ".tmp$$");
+		if( my( $long)= grep { length> $max} @paths) {
+			warn "Can't store '$dn': RDN too long for a file name ('$long')\n";
+			return LDAP_UNWILLING_TO_PERFORM
+		}
+	}
+
 	my $leaf;
 
 	$leaf= pop @paths if $opts{leaf};
