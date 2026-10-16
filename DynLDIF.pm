@@ -107,6 +107,8 @@ our %S2L= (
 # run_overlays() within attribute's values.
 our @OVERLAYS= qw/file exp find perl/;
 
+# Attributes whose values are always hidden in debug output
+our @REDACT_ATTRS= qw/userPassword/;
 
 # Necessary variables for Debconf interaction and server-side prompting.
 #  cin/cout, tin/tout: config DB in/out pipe, templates DB in/out pipe, used
@@ -189,6 +191,7 @@ sub new {
 		enablestack    => 1,       # save/reset/load/clean config directives
 		enabledump     => 1,       # savedump/loaddump config directives
 
+		protectattrs   => 'userPassword', # Attrs not usable in filters/compare
 		debug          => q{},     # Debug output (sets global %DEBUG)
 
 		# Keys that control parsing behavior in slapd.conf and basically take
@@ -644,7 +647,7 @@ sub add {
 
 	my $dn= $entry->dn;
 
-	DEBUG and p "ADD '$dn': ". ( Dumper \$ldif);
+	DEBUG and p "ADD '$dn':\n". $this->redact_ldif( $ldif);
 
 	$ret= $this->save( $dn, $entry);
 	return $ret unless $ret== LDAP_SUCCESS;
@@ -705,8 +708,8 @@ sub search {
 	}
 
 	p '-' x 78;
-	my $search = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{scope}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
-	p "SEARCH: $search";
+	my $search = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
+	DEBUG and p "SEARCH: ". $this->redact_filter( $search);
 
 	# Normalize base DN
 	$this->normalize( \$req{base});
@@ -753,7 +756,8 @@ sub search {
 
 			$req{$k}=~ s/$v/$r/; # <- substs performed here (XXX /g needed?)
 
-			pd "SEARCH SUBST #$id action $k=~ s/$v/$r/ RESULT $req{$k}";
+			DEBUG_DTL and pd "SEARCH SUBST #$id action $k=~ s/$v/$r/ RESULT ".
+				$this->redact_filter( $req{$k});
 
 		} while(
 			$i+= 3
@@ -766,8 +770,8 @@ sub search {
 	# Now, continue search as normal as if nothing ever happened
 
 	DEBUG && do {
-		my $rewrtn = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{scope}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
-		p "REWRTN: $rewrtn" if $search ne $rewrtn;
+		my $rewrtn = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
+		p "REWRTN: ". $this->redact_filter( $rewrtn) if $search ne $rewrtn;
 	};
 
 	# Save original requested base. (Need to have it, unmodified, for proper
@@ -2037,6 +2041,82 @@ sub rdn2name {
 	$rdn=~ s/%/%25/g;
 	$rdn=~ s{/}{%2f}g;
 	$rdn
+}
+
+# Attributes listed in 'protectAttrs', as hashref of lowercase names
+our %PROTECTED;
+sub protected_attrs {
+	my( $this)= @_;
+	my $list= $this->{protectattrs} // q{};
+	$PROTECTED{$list}||= {
+		map { lc $_=> 1} grep { lc $_ ne 'none'} split ' ', $list
+	}
+}
+
+# Attributes whose values are hidden in debug output
+sub redacted_attrs {
+	my( $this)= @_;
+	+{ %{ $this->protected_attrs}, map { lc $_=> 1} @REDACT_ATTRS }
+}
+
+# Whether attribute description (name, alias or OID, possibly with
+# options) refers to one of the attributes in $names (as returned by
+# protected_attrs()).
+sub attr_in {
+	my( $this, $attr, $names)= @_;
+	return 0 if !defined $attr or !%$names;
+
+	( my $name= lc $attr)=~ s/;.*//;
+	return 1 if $names->{$name};
+
+	my $schema= $this->{match_schema} or return 0;
+	my $at= $schema->attribute( $name) or return 0;
+	( any { $names->{ lc $_}} $at->{name}, $at->{oid}, @{ $at->{aliases} || []})
+		? 1 : 0
+}
+
+# LDIF, with values of redacted attributes hidden (for debug output)
+sub redact_ldif {
+	my( $this, $ldif)= @_;
+	my $names= $this->redacted_attrs;
+
+	my( $hide, @out)= ( 0);
+	for my $line( split /\n/, $ldif, -1) {
+		# Continuation of a folded line
+		if( $line=~ /^ /) {
+			push @out, $line unless $hide;
+			next
+		}
+		$hide= $line=~ /^([^:\s]+)(:[:<]?)/ && $this->attr_in( $1, $names);
+		push @out, $hide ? "$1$2 *****" : $line;
+	}
+	join "\n", @out
+}
+
+# Modification list (as returned by parse_modlist()), with values of
+# redacted attributes hidden (for debug output)
+sub redact_mods {
+	my( $this, $mods)= @_;
+	my $names= $this->redacted_attrs;
+
+	join '; ', map {
+		my( $action, $attr, @values)= @$_;
+		my $hide= $this->attr_in( $attr, $names);
+		"$action $attr". ( @values ? ': '. join( ', ', map {
+			!defined $_ ? '(none)' : $hide ? '*****' : $_ } @values) : q{})
+	} @$mods
+}
+
+# Filter string, with assertion values on redacted attributes hidden
+# (for debug output)
+sub redact_filter {
+	my( $this, $filter)= @_;
+	my $names= $this->redacted_attrs;
+
+	$filter=~ s{\((\??)([\w.;-]+)((?::[\w.-]*)*)(~=|>=|<=|:=|=)([^()]*)\)}{
+		$this->attr_in( $2, $names) ? "($1$2$3$4*****)" : "($1$2$3$4$5)"
+	}ge;
+	$filter
 }
 
 # Quick debug print. p(...)

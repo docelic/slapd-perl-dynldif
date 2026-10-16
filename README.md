@@ -236,6 +236,24 @@ should be performed.
 This includes expanding ${variable} to variable values and %{directive} to
 configuration directive values.
 
+##### protectAttrs ATTRIBUTE ...
+
+Specify attributes that clients can't test with search filters and COMPARE.
+By default, this is `userPassword`. Use `protectAttrs none` to allow testing
+all attributes.
+
+`slapd-perl` does not give the backend the identity of the client, so
+access rules (`access to ...` in `slapd.conf`) can't be applied to filters
+and COMPARE (see "LDAP Operations - Notes"). Filter components on these
+attributes therefore evaluate to Undefined, as slapd does for attributes
+the client has no access to, and COMPARE returns `insufficientAccess` (50),
+for all clients. Filters in the configuration (i.e. of the `find` overlay)
+are not affected, and BIND works as usual.
+
+Their values are also hidden in debug output.
+
+Example: `protectAttrs userPassword sambaNTPassword`
+
 ##### reset
 
 Reset current stack in memory to empty list.
@@ -535,6 +553,8 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 ## LDAP Operations - Notes
 
 1. BIND operation is supported, but only in a trivial way. Therefore, binding using a DN under this part of DIT is not encouraged nor enabled by default unless `enable_bind 1` is present in the config file. It is expected that users should authenticate using some other suffixes or via e.g. GSSAPI, so that this `bind()` is never called or needed.
+
+1. Access control (`access to ...` in `slapd.conf`) applies to the attributes that slapd returns, but `slapd-perl` leaves the rest of access checking to the backend, and does not give it the identity of the client. So filters and COMPARE can't be checked against access rules. Instead, attributes listed in `protectAttrs` (by default `userPassword`) can't be tested with filters and COMPARE by any client. Other attributes hidden by access rules can still be tested. Without any access rules, slapd allows everyone to read everything, including passwords; see the example configuration in `etc/ldap/slapd.conf`.
 
 1. DNs are accepted with any characters, including escaped special characters (`cn=Smith\, John`), spaces and Unicode. They are compared case-insensitively, and returned in canonical form (see `extension`).
 
