@@ -182,6 +182,21 @@ subtest 'size limit' => sub {
 	no_warnings();
 };
 
+subtest 'no limit means no limit' => sub {
+	my( $v)= new_dynldif( undef, empty => 1);
+	$v->add( "dn: $SUFFIX\nobjectClass: domain\ndc: example\n");
+	for my $i( 1.. 7000) {
+		my $ret= $v->add( "dn: cn=h$i,$SUFFIX\nobjectClass: device\ncn: h$i\n");
+		die "add failed ($ret)" if $ret;
+	}
+	for my $limit( -1, 0) {
+		my( $ret, @e)= $v->search( $SUFFIX, 1, 0, $limit, $limit, '(objectClass=*)', 0);
+		is( $ret, LDAP_SUCCESS, "limit $limit");
+		is( scalar @e, 7000, 'all entries returned');
+	}
+	no_warnings();
+};
+
 subtest 'searchSubst' => sub {
 	my( $ret, $dns)= search_dns( $v, "ou=people,$SUFFIX", scope => 0);
 	is( $ret, LDAP_SUCCESS);

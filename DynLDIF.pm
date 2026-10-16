@@ -839,15 +839,21 @@ sub search {
 	# ATTRONLY - attributes only, no values
 	# @ATTRS list of attrs to return, special: */null= all, += operational
 
-	# XXX
 	# slapd passes -1 for no limit (i.e. for rootdn), clients may send 0.
+	# (Then the limit is 'none' for display, and infinite for comparisons.)
+	my %limit;
 	for my $limit( qw/size time/) {
-		$req{$limit}= 6600 if not $req{$limit} or $req{$limit} eq 'max' or
-			$req{$limit}< 0;
+		no warnings 'numeric';
+		if( !$req{$limit} or $req{$limit} eq 'max' or $req{$limit}< 0) {
+			$req{$limit}= 9**9**9;
+			$limit{$limit}= 'none';
+		} else {
+			$limit{$limit}= $req{$limit};
+		}
 	}
 
 	p '-' x 78;
-	my $search = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
+	my $search = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $limit{size} -l $limit{time} '$req{filter}' @attrs|;
 	DEBUG and p "SEARCH: ". $this->redact_filter( $search);
 
 	# Normalize base DN
@@ -911,7 +917,7 @@ sub search {
 	# Now, continue search as normal as if nothing ever happened
 
 	DEBUG && do {
-		my $rewrtn = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
+		my $rewrtn = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{deref}} -z $limit{size} -l $limit{time} '$req{filter}' @attrs|;
 		p "REWRTN: ". $this->redact_filter( $rewrtn) if $search ne $rewrtn;
 	};
 
@@ -1040,8 +1046,8 @@ sub search {
 	my ( $level, $start)= ( $this->{level}, $this->{start}[ $this->{level}]);
 
 	p "SEARCH ($this->{level}) TOTAL:", scalar @matches, 'matches ('.
-		"time=". ( time- $start). "/$req{time}, ".
-		"size=". ( scalar @matches). "/$req{size})";
+		"time=". ( time- $start). "/$limit{time}, ".
+		"size=". ( scalar @matches). "/$limit{size})";
 
 	$this->{level}-= 1;
 
