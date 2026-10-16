@@ -432,6 +432,16 @@ sub config {
 		if( $key eq 'message') {                    # MESSAGE
 			warn 'Message: ', join( ' ', @val), "\n"
 
+		} elsif( $key eq 'entryappend' or $key eq 'searchsubst') { # RULES
+			# Rules are in form "ATTR PATTERN ... -> ...". Without a valid
+			# '->' marker, rule processing would loop forever.
+			my $arrow= firstidx { $_ eq '->'} @val;
+			if( $arrow< 2 or $arrow % 2 or $arrow== $#val) {
+				warn "Invalid '$key' rule '@val'; expected ".
+					"'ATTR PATTERN [ATTR PATTERN ...] -> ...'\n";
+				return LDAP_PARAM_ERROR
+			}
+
 		} elsif( $key eq 'schemaldif') {            # SCHEMA LDIF
 			my $schema= $this->{schema};
 
