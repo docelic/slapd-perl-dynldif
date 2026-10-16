@@ -1014,34 +1014,51 @@ sub search {
 		my $md= $S2L{$req{scope}};
 
 		# Use File::Find::Rule to traverse the directory tree selectively
-		# and scoop out what we want.
-		File::Find::Rule->file()
-			->name( '*'. $this->{extension})
-			->extras({ follow => 1})
-			->exec( sub{
-					# Note that here we don't pass origdn onto load(). If a specific
-					# search base is known and requested, we take that as origdn
-					# (such as shown above). But if we go into tree subsearch,
-					# then each time we use DN of the entry found (treating it
-					# as a specific search base).
-					( $ret, undef, $ldif, $entry)= $this->load(
-						$_[2], qw/dnasfile 1/);
+		# and scoop out what we want. When a limit is exceeded, the traversal
+		# is ended with die(). (Without no_chdir, that would leave the process
+		# in some directory of the tree.)
+		my $limit; # Limit exceeded (result code)
+		eval {
+			File::Find::Rule->file()
+				->name( qr/\Q$this->{extension}\E\z/) # (Full paths, see no_chdir)
+				->extras({ follow => 1, no_chdir => 1})
+				->readable
+				->exec( sub{
+						# Note that here we don't pass origdn onto load(). If a specific
+						# search base is known and requested, we take that as origdn
+						# (such as shown above). But if we go into tree subsearch,
+						# then each time we use DN of the entry found (treating it
+						# as a specific search base).
+						( $ret, undef, $ldif, $entry)= $this->load(
+							$_[2], qw/dnasfile 1/);
 
-					return $ret unless $ret== LDAP_SUCCESS;
-					if( $this->filter_match( $filter, $entry, $as_ldif)) {
-						# Size limit is exceeded only when there's a match beyond it
-						goto SIZE_LIMIT if @matches>= $req{size};
+						return 0 unless $ret== LDAP_SUCCESS;
+						if( $this->filter_match( $filter, $entry, $as_ldif)) {
+							# Size limit is exceeded only when there's a match beyond it
+							if( @matches>= $req{size}) {
+								$limit= LDAP_SIZELIMIT_EXCEEDED;
+								die "limit\n"
+							}
 
-						DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
-						unshift @matches, $as_ldif? $ldif: $entry;
-					}
+							DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
+							unshift @matches, $as_ldif? $ldif: $entry;
+						}
 
-					my $time= time;
-					goto TIME_LIMIT if any{ $time- $_> $req{time}} @{ $this->{start}}
-			} )
-			->maxdepth( $md)
-			->readable
-			->in( $dir)
+						my $time= time;
+						if( any{ $time- $_> $req{time}} @{ $this->{start}}) {
+							$limit= LDAP_TIMELIMIT_EXCEEDED;
+							die "limit\n"
+						}
+						0 # (Files are not collected)
+				} )
+				->maxdepth( $md)
+				->in( $dir);
+			1
+		} or do {
+			die $@ unless $limit and $@ eq "limit\n";
+			goto TIME_LIMIT if $limit== LDAP_TIMELIMIT_EXCEEDED;
+			goto SIZE_LIMIT
+		};
 	}
 
 	$ret= LDAP_SUCCESS;

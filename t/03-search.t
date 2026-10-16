@@ -7,8 +7,11 @@ use lib "$FindBin::Bin/lib";
 use Test::More;
 use DynLDIFTest;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_NO_SUCH_OBJECT LDAP_FILTER_ERROR
-	LDAP_SIZELIMIT_EXCEEDED/;
+	LDAP_SIZELIMIT_EXCEEDED LDAP_TIMELIMIT_EXCEEDED/;
 
+use Cwd qw/getcwd/;
+
+my $CWD= getcwd;
 my $U= "uid=testuser,ou=users,$SUFFIX";
 my $G= "cn=testuser,ou=groups,$SUFFIX";
 
@@ -179,6 +182,26 @@ subtest 'size limit' => sub {
 	( $ret, $dns)= search_dns( $v, $SUFFIX, size => -1, time => -1);
 	is( $ret, LDAP_SUCCESS, 'unlimited');
 	is( scalar @$dns, scalar @$all, 'all entries returned when unlimited');
+	no_warnings();
+};
+
+subtest 'exceeded limits leave the working directory unchanged' => sub {
+	my( $ret)= search_entries( $v, $SUFFIX, size => 1);
+	is( $ret, LDAP_SIZELIMIT_EXCEEDED);
+	is( getcwd, $CWD, 'size limit');
+
+	# Time passes while the search runs
+	{
+		no warnings 'redefine';
+		my $load= \&DynLDIF::load;
+		local *DynLDIF::load= sub { $_-= 100 for @{ $v->{start}}; $load->( @_) };
+		( $ret)= search_entries( $v, $SUFFIX, time => 10);
+	}
+	is( $ret, LDAP_TIMELIMIT_EXCEEDED);
+	is( getcwd, $CWD, 'time limit');
+
+	my( $r, $dns)= search_dns( $v, $SUFFIX);
+	is_deeply( $dns, $all, 'later searches find everything');
 	no_warnings();
 };
 
