@@ -361,6 +361,36 @@ subtest 'DNs with special characters' => sub {
 	}
 };
 
+subtest 'attribute options' => sub {
+	my $X= "cn=opt,ou=hosts,$SUFFIX";
+	is( code( $ldap->add( $X, attrs => [ objectClass => 'device', cn => 'opt',
+		'cn;lang-en' => 'English', 'description;lang-de' => 'Deutsch' ])), LDAP_SUCCESS);
+	for( [ '(cn;lang-en=english)', 1 ], [ '(cn=English)', 1, 'subtype' ],
+		[ '(cn;lang-de=English)', 0 ], [ '(description=*)', 1, 'presence of subtype' ]) {
+		my( $f, $n, $name)= @$_;
+		my $r= $ldap->search( base => "ou=hosts,$SUFFIX", filter => $f);
+		is( $r->count, $n, $name || $f);
+	}
+	is( code( $ldap->compare( $X, attr => 'cn;lang-en', value => 'ENGLISH')),
+		LDAP_COMPARE_TRUE, 'compare');
+	is( code( $ldap->modify( $X, delete => { 'cn;lang-en' => 'english' })), LDAP_SUCCESS,
+		'delete value with option');
+	is( code( $ldap->delete( $X)), LDAP_SUCCESS);
+};
+
+subtest 'overlays do not expose protected data' => sub {
+	my $X= "cn=leak,ou=hosts,$SUFFIX";
+	is( code( $ldap->add( $X, attrs => [ objectClass => 'device', cn => 'leak',
+		description => [ "\$ exp \$ $U userPassword",
+			'$ file $ dc=com/dc=example/ou=users/uid=testuser.ldif',
+			'$ find $ .. 2 0 0 0 (userPassword=*) 0 uid' ] ])), LDAP_SUCCESS);
+	my $r= $ldap->search( base => $X, scope => 'base', filter => '(objectClass=*)');
+	is( $r->count, 1);
+	is_deeply( [ $r->count ? $r->entry( 0)->get_value( 'description') : () ], [],
+		'values dropped');
+	is( code( $ldap->delete( $X)), LDAP_SUCCESS);
+};
+
 subtest 'bad values are not fatal' => sub {
 	open my $fh, '>', "$dir/data/f.txt" or die;
 	print $fh "x\n";
