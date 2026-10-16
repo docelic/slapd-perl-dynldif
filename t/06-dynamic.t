@@ -71,6 +71,22 @@ subtest 'entryAppend with missing source entry' => sub {
 	no_warnings();
 };
 
+subtest 'entryAppend attribute names and values' => sub {
+	my( $v)= new_dynldif([
+		[ 'schemaLDIF', "$DATA_DIR/schema.ldif" ],
+		[ 'entryAppend', 'objectClass', '^device$', '->',
+			'append', '.+', "cn=defaults,ou=groups,$SUFFIX" ],
+	]);
+	add_ok( $v, "dn: cn=defaults,ou=groups,$SUFFIX\nobjectClass: device\n".
+		"cn: defaults\nL: Zagreb\nou: 5\nDescription: d\n");
+	add_ok( $v, "dn: cn=h1,ou=hosts,$SUFFIX\nobjectClass: device\ncn: h1\nou: 0\n");
+	my $e= get( $v, "cn=h1,ou=hosts,$SUFFIX");
+	is_deeply( [ $e->get_value( 'ou') ], [ '0' ], "existing value '0' kept");
+	is_deeply( [ $e->get_value( 'l') ], [ 'Zagreb' ], 'names in other case appended');
+	is_deeply( [ $e->get_value( 'description') ], [ 'd' ]);
+	no_warnings();
+};
+
 subtest 'entryAppend with attr' => sub {
 	my( $v, $dir)= new_dynldif([
 		[ 'schemaLDIF', "$DATA_DIR/schema.ldif" ],

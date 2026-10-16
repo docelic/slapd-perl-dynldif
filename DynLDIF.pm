@@ -2638,99 +2638,28 @@ sub run_appender {
 		pd "SEARCH APPEND #$id matched '@$rule'";
 		$i++; # Skip the '->' marker
 
-		# Attrs specifically listed in cfg file are ALWAYS included from lookup
-		# DN into the original entry, and are free of all suitability checks,
-		# to satisfy admin who absolutely wants to add them no matter what.
+		# Attributes to append with: the ones listed in the rule (and for
+		# 'attr', in the entry's ATTRATTR attribute), or if none are listed,
+		# all attributes of the other entry. Only attributes that the entry
+		# doesn't have and that its object classes allow are appended.
 		my @lookup_attrs;
 		@lookup_attrs= @$rule[$i+3..$#$rule] if $$rule[$i+3];
 
+		my @dns;
 		if( $$rule[$i] eq 'attr') {
-			
 			# List of DNs to lookup (usually contained in seeAlso attr.)
-			my @dnattrs= $e->get_value( $$rule[$i+1]);
-
-			# Attribute containing attrs from seeAlso to add (often 'seeAlsoAttr')
-			# If no attrs found through seeAlsoAttr spec, then assume all attrs
-			# from lookup DN are expected to be added (if just allowed by schema).
-			my @lattrs= $e->get_value( $$rule[$i+2]);
-			push @lookup_attrs, @lattrs if @lattrs;
-
-			my $add_entry_attrs;
-			$add_entry_attrs= 1 if not @lookup_attrs;
-
-			for my $dn( @dnattrs) {
-
-				# Allow constructing the new DN from relative part
-				# and ending of the current entry's DN.
-				$this->expand_dots( \$dn, $e->dn);
-
-				$this->normalize( \$dn);
-				$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
-				if( $ret!= LDAP_SUCCESS) {
-					warn "EntryAppend: can't load '$dn' for '". $e->dn. "' ($ret)\n";
-					next
-				}
-
-				my $ae= $ret{entry};
-
-				push @lookup_attrs, $ae->attributes if $add_entry_attrs;
-
-				# "uniq" the array elements
-				my %lookup_attrs= map{ $_ => 1} @lookup_attrs;
-				@lookup_attrs= keys %lookup_attrs;
-
-				# Expand objectClasses list
-				# XXX disabled for now, but I think it shouldn't be?
-				#my @ocs= $e->get_value( 'objectClass');
-				#my @newocs= $ae->get_value( 'objectClass');
-				#for my $oc( @newocs) {
-				#	if( not grep {/^$oc$/} @ocs) {
-				#		$e->add( 'objectClass', $oc)
-				#	}
-				#}
-
-				my @can;
-				for my $oc( $e->get_value( 'objectClass')){
-					# XXX this honors MUST params but really... should it,
-					# in stable operation?
-					push @can, $_->{name} for(
-						$this->{schema}->may( $oc), $this->{schema}->must( $oc));
-				}
-
-				# XXX Optimize this loop
-				for my $a( @lookup_attrs) {
-
-					# Consider only nonexistent args for appending. XXX or if they 
-					# exist but multivalue is supported. this needs to be added.
-					next if $e->get_value( $a);
-
-					# Determine if the attribute is allowed by schema, skip if not.
-					if( any {/^$a$/} @can){
-						pd "Entry allows append with $a";
-					} else {
-						pd "Entry does not allow append with $a";
-						next;
-					}
-
-					# So now we know we can add it.
-
-					my @v= $ae->get_value( $a);
-
-					$e->add( $a, [ @v])
-
-				} # FOR $a ( $dnattr->attrs)
-
-			} # FOR $dn ( @dnattr)
+			@dns= $e->get_value( $$rule[$i+1]);
+			push @lookup_attrs, $e->get_value( $$rule[$i+2]) if defined $$rule[$i+2];
 
 		} elsif( $$rule[$i] eq 'append') {
 			( my $dn= $e->dn)=~ s/$$rule[$i+1]/$$rule[$i+2]/;
+			@dns= ( $dn);
+		}
 
-			# XXX JOIN THE TWO LOOPS 
-
-			# If no attrs found through seeAlsoAttr spec, then assume all attrs
-			# from lookup DN are expected to be added.
-			my $add_entry_attrs;
-			$add_entry_attrs= 1 if not @lookup_attrs;
+		for my $dn( @dns) {
+			# Allow constructing the new DN from relative part
+			# and ending of the current entry's DN.
+			$this->expand_dots( \$dn, $e->dn) if $$rule[$i] eq 'attr';
 
 			$this->normalize( \$dn);
 			$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
@@ -2738,59 +2667,45 @@ sub run_appender {
 				warn "EntryAppend: can't load '$dn' for '". $e->dn. "' ($ret)\n";
 				next
 			}
-
-			my $ae= $ret{entry};
-
-			push @lookup_attrs, $ae->attributes if $add_entry_attrs;
-
-			# "uniq" the array elements
-			my %lookup_attrs= map{ $_ => 1} @lookup_attrs;
-			@lookup_attrs= keys %lookup_attrs;
-
-			# Expand objectClasses list
-			# XXX disabled but should it be? (same as above)
-			#my @ocs= $e->get_value( 'objectClass');
-			#my @newocs= $ae->get_value( 'objectClass');
-			#for my $oc( @newocs) {
-			#	if( not grep {/^$oc$/} @ocs) {
-			#		$e->add( 'objectClass', $oc)
-			#	}
-			#}
-
-			# XXX Optimize this loop
-			for my $a( @lookup_attrs) {
-
-				# Consider only nonexistent args for appending
-				next if $e->get_value( $a);
-
-				# Determine if the attribute is allowed by schema, skip if not.
-				# XXX MEMOIZE
-				my @can;
-				for my $oc( $e->get_value( 'objectClass')) {
-					# XXX again honors ->must()
-					push @can, $_->{name} for(
-						$this->{schema}->may( $oc), $this->{schema}->must( $oc));
-				}
-
-				unless( any{ /^$a$/} @can) {
-					#p "testing for $a: YES";
-				#} else {
-					#p "testing for $a: NO";
-					next
-				}
-
-				# So now we know we can add it.
-
-				my @v= $ae->get_value( $a);
-
-				$e->add( $a, [ @v])
-
-			} # FOR my $a
-
-		} # IF $$rule[$i] eq 'attr|append'
+			$this->append_attrs( $e, $ret{entry}, @lookup_attrs);
+		}
 
 	} # FOR my $rule
+}
 
+# Append entry $e with attributes of entry $ae: the ones in @attrs, or all if
+# none are given. Only attributes that $e does not have, and that its object
+# classes allow (according to the schema), are appended.
+sub append_attrs {
+	my( $this, $e, $ae, @attrs)= @_;
+	@attrs= $ae->attributes unless @attrs;
+
+	my $can= $this->allowed_attrs( $e);
+	my %seen;
+	for my $a( @attrs) {
+		next if $seen{ lc $a}++ or $e->exists( $a);
+		unless( $this->attr_in( $a, $can)) {
+			pd "Entry does not allow append with $a";
+			next
+		}
+		my @v= $ae->get_value( $a) or next;
+		$e->add( $a, [ @v])
+	}
+}
+
+# Attributes allowed in entry by the schema (MUST and MAY attributes of its
+# object classes), as hashref of lowercase names, aliases and OIDs
+sub allowed_attrs {
+	my( $this, $e)= @_;
+	my $schema= $this->{schema};
+	my %can;
+	for my $oc( $e->get_value( 'objectClass')) {
+		for my $at( $schema->may( $oc), $schema->must( $oc)) {
+			$can{ lc $_}= 1 for grep { defined}
+				$at->{name}, $at->{oid}, @{ $at->{aliases} || []};
+		}
+	}
+	\%can
 }
 
 # Expand trailing dots in a DN specification to that many last components
