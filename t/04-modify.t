@@ -11,6 +11,7 @@ use FindBin;
 use lib "$FindBin::Bin/lib";
 use Test::More;
 use DynLDIFTest;
+use File::Find qw//;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_NO_SUCH_OBJECT LDAP_OPERATIONS_ERROR
 	LDAP_TYPE_OR_VALUE_EXISTS LDAP_NO_SUCH_ATTRIBUTE LDAP_NOT_ALLOWED_ON_RDN/;
 
@@ -140,12 +141,14 @@ subtest 'modifySmarts and write errors' => sub {
 	my( $v, $dir)= new_dynldif();
 	my $file= data_file( $dir, $U);
 
-	# Make the file unwritable: a no-op modify must not try to write it,
+	# Make the directory unwritable (entries are written to a temporary
+	# file there, then renamed): a no-op modify must not try to write,
 	# while a real change must report the write failure.
-	chmod 0444, $file;
+	( my $parent= $file)=~ s{/[^/]+$}{};
+	chmod 0555, $parent;
 	SKIP: {
 		skip 'running as root, permissions are not enforced', 3
-			if open( my $fh, '>>', $file);
+			if open( my $fh, '>', "$parent/probe");
 
 		is( $v->modify( $U, 'REPLACE', 'sn', 'User'), LDAP_SUCCESS,
 			'no-op modify does not write');
@@ -153,8 +156,18 @@ subtest 'modifySmarts and write errors' => sub {
 			'failed write is reported');
 		warnings_like( qr/Can't wropen/);
 	}
-	chmod 0644, $file;
+	chmod 0755, $parent;
 	is( get( $v, $U)->get_value( 'sn'), 'User', 'entry unchanged');
+	is_deeply( [ glob "$parent/*.tmp*" ], [], 'no temporary file left');
+
+	# Successful writes replace the file, leaving no temporary files
+	my $inode= ( stat $file)[1];
+	is( $v->modify( $U, 'REPLACE', 'sn', 'Changed'), LDAP_SUCCESS);
+	isnt( ( stat $file)[1], $inode, 'file replaced');
+	is( get( $v, $U)->get_value( 'sn'), 'Changed', 'entry changed');
+	my @tmp;
+	File::Find::find( sub { push @tmp, $_ if /\.tmp/}, $dir);
+	is_deeply( \@tmp, [], 'no temporary files in the tree');
 	no_warnings();
 };
 

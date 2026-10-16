@@ -2165,20 +2165,19 @@ sub dn2leaf {
 	my $open_type; # Used for printing in error message
 
 	if( $opts{writeop}) {
+		# Data is written to a temporary file, which save() renames to $file
+		# when done, so that readers never see a partially written entry.
 		$open_type= 'wr';
-		$fh= new IO::File "> $file";
+		$ret->{tmpfile}= "$file.tmp$$";
+		$fh= IO::File->new( $ret->{tmpfile}, '>');
 		unless( defined $fh) {
-			warn "Can't wropen '$file' ($!)\n";
-			return LDAP_OPERATIONS_ERROR
-		}
-		unless( flock $fh, LOCK_EX) {
-			warn "Can't flock_EX wropened '$file' ($!)\n";
+			warn "Can't wropen '$ret->{tmpfile}' ($!)\n";
 			return LDAP_OPERATIONS_ERROR
 		}
 	}
 	elsif( $opts{openfh}) {
 		$open_type= 'rd';
-		$fh= new IO::File "< $file";
+		$fh= IO::File->new( $file, '<');
 		unless( defined $fh) {
 			warn "Can't rdopen '$file' ($!)\n";
 			return LDAP_OPERATIONS_ERROR
@@ -2808,7 +2807,11 @@ sub save {
 	my( $ret, %ret);
 
 	# If we were called with an entry, turn it to LDIF.
-	$ldif= $this->e2ldif( $dn, $ldif) if ref $ldif;
+	if( ref $ldif) {
+		my $entry= $ldif;
+		$ldif= $this->e2ldif( $dn, $entry);
+		return $ldif if $ldif=~ /^\d+$/; # (Error)
+	}
 
 	# Locate/resolve the file to which we'll save data and open filehandle
 	# to it. Two things can also be specified in the config file which
@@ -2824,16 +2827,16 @@ sub save {
 		return $ret
 	}
 
-	# Save ldif data into file
-	my $fh= $ret{fh};
-	unless( print {$fh} $ldif) {
-		warn "Can't print to '$ret{file}' ($!)\n";
+	# Save ldif data into a temporary file, and rename it to the entry's file
+	my( $fh, $tmp)= @ret{qw/fh tmpfile/};
+	unless( print( {$fh} $ldif) and $fh->close) {
+		warn "Can't write '$tmp' ($!)\n";
+		unlink $tmp;
 		return LDAP_OPERATIONS_ERROR
 	}
-
-	# Close file
-	unless( $fh->close) {
-		warn "Can't wrclose '$ret{file}' ($!)\n";
+	unless( rename $tmp, $ret{file}) {
+		warn "Can't rename '$tmp' to '$ret{file}' ($!)\n";
+		unlink $tmp;
 		return LDAP_OPERATIONS_ERROR
 	}
 
