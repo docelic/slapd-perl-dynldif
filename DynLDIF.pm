@@ -1038,6 +1038,20 @@ sub modify {
 }
 
 
+# Does entry contain the RDN value of (normalized) $dn?
+sub has_rdn_value {
+	my( $this, $entry, $dn)= @_;
+
+	my @avas= $this->rdn_avas( $dn) or return 0;
+
+	# (All values of a multi-valued RDN)
+	all {
+		my( $attr, $value)= @$_;
+		my $n= normalize_value( $value);
+		any { normalize_value( $_) eq $n} $entry->get_value( $attr)
+	} @avas
+}
+
 # Deleting entries
 sub delete {
 	# XXX Make perl backend actually pass various delete options onto us.
@@ -1820,7 +1834,7 @@ sub dn2leaf {
 	}
 
 	# Must be normalized by the time we reach here
-	unless( $dn=~ qr/^[a-z0-9,=\/_\.-]+$/o) {
+	unless( $this->valid_dn( $dn)) {
 		warn "DN2LEAF Invalid or non-normalized DN '$dn'";
 		return LDAP_INVALID_DN_SYNTAX
 	}
@@ -2475,19 +2489,131 @@ sub ldif2e {
 
 # Normalize. Can give scalar ref (just a DN), or a whole entry so possibly
 # more than DN normalization will be done.
+# Normalizes DN (scalar ref) or entry's DN (entry) to canonical form (see
+# canonical_dn()). Invalid DNs are left unchanged, to be rejected by
+# valid_dn().
 sub normalize {
 	my( $this, $ptr)= @_;
 
 	# Just in case we only get DN as a scalar to normalize.
 	if( ref $ptr eq 'SCALAR') {
-		$$ptr= lc $$ptr;
-		$$ptr=~ s/\s+//g;
+		my $dn= canonical_dn( $$ptr);
+		$$ptr= $dn if defined $dn;
 	} else {
-		( my $dn= lc $ptr->dn)=~ s/\s+//g;
-		$ptr->dn( $dn);
+		my $dn= canonical_dn( $ptr->dn);
+		$ptr->dn( $dn) if defined $dn;
 	}
 
 	LDAP_SUCCESS
+}
+
+# Whether DN is valid and in canonical form
+sub valid_dn {
+	my( $this, $dn)= @_;
+	my $canonical= canonical_dn( $dn);
+	defined $canonical and length $canonical and $canonical eq $dn
+}
+
+# DNs are kept in a canonical form, which is also what the directory tree
+# on disk is named by: attribute names and values are lowercased (values
+# are compared case-insensitively), whitespace around values is removed and
+# runs of whitespace within values collapsed to a single space, special
+# characters in values are escaped as \xx, and values of multi-valued RDNs
+# are sorted. Since ',' and '+' in values are always escaped, DNs in
+# canonical form can be split into RDNs on ',', and RDNs into attribute and
+# value on the first '='.
+#
+# Returns undef for invalid DNs.
+our %CANONICAL;
+sub canonical_dn {
+	my( $dn)= @_;
+	return $CANONICAL{$dn} if exists $CANONICAL{$dn};
+	%CANONICAL= () if keys %CANONICAL> 10000;
+
+	my $rdns= parse_dn( $dn);
+	$CANONICAL{$dn}= $rdns ? join ',', map {
+		join '+', sort map {
+			lc( $$_[0]). '='. escape_dn_value( normalize_value( $$_[1]))
+		} @$_
+	} @$rdns : undef
+}
+
+# Parses DN (in string representation of RFC 4514) into a list of RDNs, each
+# an arrayref of [ attribute, value ] pairs, with values unescaped. Returns
+# undef for invalid DNs.
+sub parse_dn {
+	my( $dn)= @_;
+	return undef unless defined $dn;
+
+	my( @rdns, @avas);
+	for( $dn) {
+		return [] unless /\S/;
+
+		while( 1) {
+			/\G\s*([A-Za-z][A-Za-z0-9-]*|\d+(?:\.\d+)+)\s*=\s*/gc or return undef;
+			my( $attr, $value)= ( $1);
+
+			if( /\G"((?:[^"\\]|\\.)*)"\s*/gc) {
+				( $value= $1)=~ s/\\(.)/$1/gs;
+
+			} elsif( /\G((?:[^,;+"\\]|\\(?:[0-9A-Fa-f]{2}|[^0-9A-Fa-f]))*)/gc) {
+				$value= $1;
+				$value=~ s/(?<!\\)\s+$//; # Unescaped trailing space is insignificant
+				$value=~ s/\\([0-9A-Fa-f]{2}|.)/length $1== 2 ? chr hex $1 : $1/gse;
+			}
+
+			push @avas, [ $attr, $value ];
+			next if /\G\+/gc;
+
+			push @rdns, [ @avas ];
+			@avas= ();
+			last if /\G\z/gc;
+			/\G[,;]/gc or return undef;
+		}
+	}
+
+	\@rdns
+}
+
+# Normalized form of a value (as in RDNs): lowercased, with surrounding
+# whitespace removed and runs of whitespace collapsed to a single space.
+# Values are UTF-8.
+sub normalize_value {
+	my( $value)= @_;
+	return $value unless defined $value;
+
+	my $chars= $value;
+	my $utf8= utf8::decode( $chars);
+	$chars= lc $chars;
+	$chars=~ s/^\s+|\s+$//g;
+	$chars=~ s/\s+/ /g;
+	utf8::encode( $chars) if $utf8;
+	$chars
+}
+
+# Escapes special characters in a DN value (canonical form, see
+# canonical_dn())
+sub escape_dn_value {
+	my( $value)= @_;
+	$value=~ s/([\\",+;<>=\x00-\x1f])/sprintf '\\%02x', ord $1/ge;
+	$value=~ s/^([ #])/sprintf '\\%02x', ord $1/e;
+	$value=~ s/ $/\\20/;
+	$value
+}
+
+# The [ attribute, value ] pairs of DN's first RDN, with values unescaped
+sub rdn_avas {
+	my( $this, $dn)= @_;
+	my $rdns= parse_dn( $dn) or return;
+	@{ $rdns->[0] || []}
+}
+
+# Values of entry's attribute, without the ones equal to value (compared
+# as in RDNs)
+sub values_except {
+	my( $this, $entry, $attr, $value)= @_;
+	my $n= normalize_value( $value);
+	grep { normalize_value( $_) ne $n} $entry->get_value( $attr)
 }
 
 # Relocator code is Debconf/LDAP specific. It looks for 'variables' attribute

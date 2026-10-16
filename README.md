@@ -152,6 +152,13 @@ Each file contains one LDAP entry in LDIF format.
 File extension must be specified to make directories distinguishable
 from files, and the default value should rarely be changed.
 
+Directories and files are named by DN components in canonical form:
+lowercased, with whitespace around values removed and runs of whitespace
+within values collapsed to a single space, and special characters in values
+escaped as `\xx` (i.e. `cn=Smith\, John` is stored as `cn=smith\2c john.ldif`).
+This is also the form in which DNs are returned to clients. Since `/` can't
+be used in file names, it is stored as `%2f` (and `%` as `%25`).
+
 ##### load FILE [PATTERN REPLACEMENT ...]
 
 Load and process configuration stack from FILE.
@@ -494,5 +501,7 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 ## LDAP Operations - Notes
 
 1. BIND operation is supported, but only in a trivial way. Therefore, binding using a DN under this part of DIT is not encouraged nor enabled by default unless `enable_bind 1` is present in the config file. It is expected that users should authenticate using some other suffixes or via e.g. GSSAPI, so that this `bind()` is never called or needed.
+
+1. DNs are accepted with any characters, including escaped special characters (`cn=Smith\, John`), spaces and Unicode. They are compared case-insensitively, and returned in canonical form (see `extension`).
 
 1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`.
