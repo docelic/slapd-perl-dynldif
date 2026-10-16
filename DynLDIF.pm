@@ -671,8 +671,10 @@ sub config {
 			$this->{tmpdir}= join '/', $this->{directory}, 'tmp';
 
 			if( ! -e $this->{tmpdir} or ! -d $this->{tmpdir}) {
-				unless( mkpath $this->{tmpdir}) {
-					warn "Can't mkdir '$this->{tmpdir}' ($!)\n";
+				# (mkpath dies on errors)
+				unless( eval { mkpath $this->{tmpdir}; 1 } and -d $this->{tmpdir}) {
+					( my $err= $@ || $!)=~ s/ at \S+ line \d+.*//s;
+					warn "Can't mkdir '$this->{tmpdir}' ($err)\n";
 					return LDAP_OPERATIONS_ERROR
 				}
 			}
