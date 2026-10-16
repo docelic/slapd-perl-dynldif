@@ -287,7 +287,7 @@ have the option of specifying ATTRs to append with.
 
 If left unspecified, the entry is appended with all allowed attributes.
 
-Examples from production config:
+Examples:
 
 ```
 entryAppend  objectClass "^dhcpHost$"                      \
@@ -427,7 +427,7 @@ When a specific search base is requested, and it does not exist in the searched
 location, it is possible to fallback to a chain of default entries. The first
 entry found wins.
 
-Examples: production examples defaulting to site-wide and global defaults
+Examples: defaulting to site-wide and global defaults
 
 ```
 # Fallback 1: site defaults tree.
@@ -458,7 +458,7 @@ KEY can be one of base, scope, deref, size, time, filter, attrOnly. Rewriting
 one last element of a search, the list of attributes to return, is currently
 not possible, but the feature is on the way.
 
-Examples: production examples used in rewriting ou=dhcp to ou=clients
+Examples: rewriting ou=dhcp to ou=clients
 
 ```
 Example 1:

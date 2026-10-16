@@ -1497,14 +1497,14 @@ sub run_overlays {
 							# value: IP3
 							#
 							# Note that in a direct LDAP query, this would return multiple
-							# value:s as shown. In a query through scripts/node_data though,
-							# the param name ('value') would be replaced with the key name,
-							# so it'd look perfectly meaningful (assuming that the Debconf
-							# key is named viper/ntp_server):
+							# value:s as shown. In a client that replaces
+							# the param name ('value') with the key name, it'd look
+							# perfectly meaningful (assuming that the Debconf key is named
+							# myapp/ntp_server):
 							#
-							# viper_ntp_server: IP1
-							# viper_ntp_server: IP2
-							# viper_ntp_server: IP3
+							# myapp_ntp_server: IP1
+							# myapp_ntp_server: IP2
+							# myapp_ntp_server: IP3
 							#
 							# But ok, anyway, to make the expansion to multiple attributes,
 							# overlay should first return an arrayref instead of a scalar.
@@ -2394,9 +2394,8 @@ sub normalize {
 # should always be none or one found).
 # If name matches a known relocation recipe, perform DN regex replacement
 # that corresponds to this named relocation, and actually relocate it.
-# The 'variables' attribute gets filled properly by using a slightly
-# modified frontend on the client side which inserts those values (i.e.
-# the GnomeViper frontend).
+# The 'variables' attribute gets filled by a slightly modified Debconf
+# frontend on the client side which inserts those values.
 sub check_relocation {
 	my ($this, $entry, $where)= @_;
 
