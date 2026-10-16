@@ -24,6 +24,17 @@ subtest 'directive names' => sub {
 	# Both 'save' and 'savedump' are prefixes of this
 	is( $v->config( 'savedumpx', 1), LDAP_PARAM_ERROR, 'ambiguous rejected');
 	warnings_like( qr/Ambiguous config directive/);
+
+	# Internal state is not configurable
+	# ('expanding' is only set during operations, and as a directive name
+	# resolves to 'exp')
+	for my $key( grep { $_ ne 'expanding'} sort keys %DynLDIF::INTERNAL) {
+		my $before= $v->{$key};
+		is( $v->config( $key, 'x'), LDAP_PARAM_ERROR, "internal key '$key' rejected");
+		is( $v->{$key}, $before, 'and not changed');
+	}
+	warnings_like( qr/Unknown config directive '$_'/) for grep { $_ ne 'expanding'}
+		keys %DynLDIF::INTERNAL;
 	no_warnings();
 };
 
@@ -78,6 +89,19 @@ subtest 'save and load config stack' => sub {
 	is( $v3->{deletetrees}, 1, 'scalar directive restored');
 	is_deeply( $v3->{searchfallback}, [[ 'cn=a', 'cn=c' ]],
 		'substitution applied on load');
+	no_warnings();
+
+	# Errors in loaded lines are errors of 'load'
+	$v2->config( 'reset');
+	$v2->config( 'searchFallback', 'cn=a', 'cn=b');
+	$v2->config( 'save', 'stack2');
+	is( $v3->config( 'load', 'stack2', 'cn=a', '('), LDAP_PARAM_ERROR,
+		'invalid line');
+	warnings_like( qr/Invalid regex '\('/);
+	warnings_like( qr/Error in line 'searchfallback \( cn=b' of stack file 'stack2'/);
+	is( $v3->config( 'load', 'stack2', '(', 'x'), LDAP_PARAM_ERROR,
+		'invalid substitution pattern');
+	warnings_like( qr/Invalid regex '\(' in 'load'/);
 	no_warnings();
 };
 

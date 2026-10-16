@@ -121,6 +121,11 @@ our ( $cin, $cout, $tin, $tout);
 our ( $dc, $dt, $df, $dm);
 
 
+# Keys of the instance (see new()) that hold internal state, and are not
+# config directives
+our %INTERNAL= map { $_=> 1} qw/schema tmpdir stack standard_parse level
+	cache op_cache_valid start match_schema rule_cache expanding/;
+
 # Backend instance
 sub new {
 	my( $class)= @_;
@@ -440,10 +445,10 @@ sub config {
 		# clarity. Internally, we use short names. I.e. a config line of 
 		# "expandval opt1 opt2" is translated to "exp" internally.
 		# (But you can also specify 'exp' directly (or anything in between)).
-		if( !defined $this->{$key}) {
+		if( !defined $this->{$key} or $INTERNAL{$key}) {
 			my @keys;
-			for my $cfgkey( keys %$this) {
-				push @keys, $cfgkey if $key=~ /^$cfgkey/
+			for my $cfgkey( grep { !$INTERNAL{$_}} keys %$this) {
+				push @keys, $cfgkey if $key=~ /^\Q$cfgkey/
 			}
 			if( @keys== 1) { # Great, uniquely found the right key
 				p "Resolved config key '$key' to '$keys[0]'";
@@ -577,7 +582,7 @@ sub config {
 			# In load specification, the first argument is the filename. The rest,
 			# if present, is a list of PATTERN REPLACEMENT to perform
 			# on each stored line before sending it to the config processor.
-			$_= shift @val;
+			local $_= shift @val;
 			my $orig_fn= $_;
 
 			s/[^\w\.]//g; # allow only [\w\.]+ in filename
@@ -623,7 +628,11 @@ sub config {
 						}
 					}
 
-					$this->config( @$line)
+					my $ret= $this->config( @$line);
+					unless( $ret== LDAP_SUCCESS) {
+						warn "Error in line '@$line' of stack file '$_'\n";
+						return $ret
+					}
 				}
 			} else {
 				warn "Empty stack file '$_'. Configuration mistake?\n"
@@ -733,6 +742,8 @@ sub config_regexes {
 
 	return $val[0] if $key eq 'searchfallback';
 	return $val[1] if $key eq 'addrelocate';
+	return @val[ grep { $_ % 2} 1.. $#val] if $key eq 'load'; # FILE PATTERN REPLACEMENT...
+	return @val[ grep { $_ % 2} 1.. $#val] if $key eq 'load'; # PATTERN REPLACEMENT ...
 	return @val[0, 1] if $key eq 'addprompt';
 	return grep { defined} @val[0, 1] if $key=~ /^(?:exp|file|find|perl)$/;
 
