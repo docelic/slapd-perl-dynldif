@@ -255,6 +255,18 @@ sub init {
 
 	# Let's do some checking.
 
+	# Both are required (without 'directory', paths would start at '/')
+	unless( length $this->{directory}) {
+		warn "Directive 'directory' is not set; set it and restart slapd.\n";
+		return LDAP_PARAM_ERROR
+	}
+	unless( length $this->{treesuffix} and length( canonical_dn( $this->{treesuffix}) // '')) {
+		warn length $this->{treesuffix} ?
+			"Invalid 'treeSuffix' '$this->{treesuffix}'; fix it and restart slapd.\n" :
+			"Directive 'treeSuffix' is not set; set it (to the database suffix) and restart slapd.\n";
+		return LDAP_PARAM_ERROR
+	}
+
 	# Make sure 'extension' is non-empty. (As to why, read note on
 	# 'extension' above).
 	if( not $this->{extension}) {
@@ -2233,7 +2245,7 @@ sub dn2leaf {
 
 	# Must be normalized by the time we reach here
 	unless( $this->valid_dn( $dn)) {
-		warn "DN2LEAF Invalid or non-normalized DN '$dn'";
+		warn "DN2LEAF Invalid or non-normalized DN '$dn'\n";
 		return LDAP_INVALID_DN_SYNTAX
 	}
 

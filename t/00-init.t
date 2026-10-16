@@ -57,4 +57,23 @@ subtest 'empty extension is rejected' => sub {
 	no_warnings();
 };
 
+subtest 'directory and treeSuffix are required' => sub {
+	my( $v, $dir)= new_dynldif( undef, empty => 1);
+
+	my $v2= DynLDIF->new;
+	$v2->config( 'treeSuffix', $SUFFIX);
+	is( $v2->init, LDAP_PARAM_ERROR, 'no directory');
+	warnings_like( qr/^Directive 'directory' is not set/);
+
+	$v2= DynLDIF->new;
+	$v2->config( 'directory', $dir);
+	is( $v2->init, LDAP_PARAM_ERROR, 'no treeSuffix');
+	warnings_like( qr/^Directive 'treeSuffix' is not set/);
+
+	$v2->config( 'treeSuffix', 'dc=a,,dc=b');
+	is( $v2->init, LDAP_PARAM_ERROR, 'invalid treeSuffix');
+	warnings_like( qr/^Invalid 'treeSuffix' 'dc=a,,dc=b'/);
+	no_warnings();
+};
+
 done_testing;
