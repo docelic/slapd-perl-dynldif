@@ -125,6 +125,9 @@ our ( $cin, $cout, $tin, $tout);
 our ( $dc, $dt, $df, $dm);
 
 
+# Search parameters (keys in 'searchSubst' rules)
+our %SEARCH_PARAMS= map { $_=> 1} qw/base scope deref size time filter attrOnly/;
+
 # Keys of the instance (see new()) that hold internal state, and are not
 # config directives
 our %INTERNAL= map { $_=> 1} qw/schema tmpdir stack standard_parse level
@@ -542,6 +545,28 @@ sub config {
 			if( $arrow< 2 or $arrow % 2 or $arrow== $#val) {
 				warn "Invalid '$key' rule '@val'; expected ".
 					"'ATTR PATTERN [ATTR PATTERN ...] -> ...'\n";
+				return LDAP_PARAM_ERROR
+			}
+			my @action= @val[ $arrow+ 1.. $#val];
+
+			if( $key eq 'searchsubst') {
+				# Keys are search parameters, actions KEY PATTERN REPLACEMENT
+				my @keys= ( @val[ grep { !( $_ % 2)} 0.. $arrow- 1],
+					@action[ grep { !( $_ % 3)} 0.. $#action]);
+				if( my( $bad)= grep { !$SEARCH_PARAMS{$_}} @keys) {
+					warn "Invalid key '$bad' in '$key' rule '@val'; expected one of ".
+						join( ', ', sort keys %SEARCH_PARAMS). "\n";
+					return LDAP_PARAM_ERROR
+				}
+				if( @action % 3) {
+					warn "Invalid '$key' rule '@val'; expected ".
+						"'-> KEY PATTERN REPLACEMENT [KEY PATTERN REPLACEMENT ...]'\n";
+					return LDAP_PARAM_ERROR
+				}
+			} elsif( !( $action[0] eq 'attr' and @action>= 2 or
+				$action[0] eq 'append' and @action>= 3)) {
+				warn "Invalid '$key' rule '@val'; expected '-> attr ATTRIBUTE ...' ".
+					"or '-> append PATTERN REPLACEMENT ...'\n";
 				return LDAP_PARAM_ERROR
 			}
 

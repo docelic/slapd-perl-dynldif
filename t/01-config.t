@@ -57,6 +57,9 @@ subtest 'rule syntax is validated' => sub {
 		[ qw/objectClass -> append .+ cn=x/ ],           # odd conditions
 		[ qw/-> append .+ cn=x/ ],                       # no conditions
 		[ qw/objectClass posixAccount ->/ ],             # no actions
+		[ qw/objectClass x -> foo .+ cn=x/ ],            # unknown action
+		[ qw/objectClass x -> append .+/ ],              # no replacement
+		[ qw/objectClass x -> attr/ ],                   # no attribute
 	) {
 		is( $v->config( 'entryAppend', @$rule), LDAP_PARAM_ERROR,
 			"entryAppend '@$rule' rejected");
@@ -67,6 +70,19 @@ subtest 'rule syntax is validated' => sub {
 		'searchSubst without arrow rejected');
 	warnings_like( qr/Invalid 'searchsubst' rule/);
 
+	for my $rule(
+		[ qw/bse x -> base .+ y/ ],          # unknown condition key
+		[ qw/base x -> filtr .+ y/ ],        # unknown action key
+		[ qw/base x -> base .+/ ],           # incomplete action
+		[ qw/base x -> base .+ y scope/ ],
+	) {
+		is( $v->config( 'searchSubst', @$rule), LDAP_PARAM_ERROR,
+			"searchSubst '@$rule' rejected");
+		warnings_like( qr/Invalid (key '\w+' in )?'searchsubst' rule/);
+	}
+
+	is( $v->config( 'searchSubst', qw/scope 1 filter x attrOnly 0 -> size .+ 1 time .+ 2 deref .+ 0/),
+		LDAP_SUCCESS, 'all search parameters accepted');
 	is( $v->config( 'entryAppend', qw/objectClass x dn y -> append .+ cn=x/),
 		LDAP_SUCCESS, 'valid entryAppend accepted');
 	is( $v->config( 'searchSubst', qw/base x -> base .+ y/),
