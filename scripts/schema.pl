@@ -8,18 +8,18 @@ use strict;
 # pre-authenticated schema retrieval will work.
 #
 # Apart from its standalone use, this is also useful/needed with
-# the Viper backend because slapd does not provide slapd-perl with
+# the DynLDIF backend because slapd does not provide slapd-perl with
 # access to the schema.
 #
 # So, after starting the LDAP server, this script is run to download
-# schema into a file, and then Viper's option "schemaLDIF" can find
+# schema into a file, and then DynLDIF's option "schemaLDIF" can find
 # and load it, and thus become aware of schema.
 #
 # ./schema.pl [hostname]
 #
 # Example:
 #
-# sudo sh -c './scripts/schema.pl > /etc/ldap/slapd-viper/schema.ldif'
+# sudo sh -c './scripts/schema.pl > /etc/ldap/slapd-perl-dynldif/schema.ldif'
 #
 # Davor Ocelic <docelic@crystallabs.io>
 # Crystal Labs, https://crystallabs.io/

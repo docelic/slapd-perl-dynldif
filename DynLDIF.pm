@@ -1,13 +1,13 @@
-package Viper;
+package DynLDIF;
 # vim: se ts=2 sts=2 sw=2 ai
 #
-# Viper -- Custom Perl backend for use with the OpenLDAP server.
+# DynLDIF -- Custom Perl backend for use with the OpenLDAP server.
 #
 # Davor Ocelic <docelic@crystallabs.io>
 # Crystal Labs, https://crystallabs.io/
 # Released under GPL v3.
 #
-# The Viper backend implements regular LDAP functionality and can be used in
+# The DynLDIF backend implements regular LDAP functionality and can be used in
 # general-purpose LDAP scenarios where you want quick results on a platform
 # that comes with extra features (default entries, query rewriting, dynamic
 # values, etc.), and also lends itself to further customization.
@@ -144,7 +144,7 @@ sub new {
 	my $this= {
 		treesuffix     => q{},     # Suffix (too bad we're not called with it),
 		                           # and 'suffix' directive can only be specified
-		                           # before Viper.pm module so we can't get that
+		                           # before DynLDIF.pm module so we can't get that
 		                           # one from slapd. We basically have to invent
 		                           # a new directive and set it to the same value.
 		directory      => q{},     # Base directory / datadir for tree. Can be
@@ -292,7 +292,7 @@ sub init {
 	#}
 
 	# Initialize schema obj. We do that in new(), but add ||= check here
-	# for situations where Viper is ran standalone using config dump from
+	# for situations where DynLDIF is ran standalone using config dump from
 	# file, where references to objects are of course lost.
 	$this->{schema}||= new Net::LDAP::Schema;
 
@@ -1057,8 +1057,8 @@ sub delete {
 # The next thing we'll cover are overlays.
 #
 
-# Viper supports overlays that are similar to slapd overlays in effect,
-# but have nothing to do with slapd -- they're implemented in Viper
+# DynLDIF supports overlays that are similar to slapd overlays in effect,
+# but have nothing to do with slapd -- they're implemented in DynLDIF
 # entirely, and use a different set of configuration directives to enable.
 
 # All overlays have been put together in a single function for efficiency;
@@ -2390,7 +2390,7 @@ sub normalize {
 # Relocator code is Debconf/LDAP specific. It looks for 'variables' attribute
 # in the Debconf entry ('variables' and debconfDBEntry is defined in
 # debconf.schema so it makes sense to enable this only under the debconf tree).
-# If 'variables' attrs exist, parse them to grep out viper_location=NAME (there
+# If 'variables' attrs exist, parse them to grep out dynldif_location=NAME (there
 # should always be none or one found).
 # If name matches a known relocation recipe, perform DN regex replacement
 # that corresponds to this named relocation, and actually relocate it.
@@ -2425,18 +2425,18 @@ sub check_relocation {
 	# elegant, but it's better to remove them).
 	my @variables2;
 	for( @variables) {
-		if( /viper_location=(.+)/) {
+		if( /dynldif_location=(.+)/) {
 			$location_name= $1
 		} else {
 			push @variables2, $_
 		}
 	}
 
-	# No work if no viper_location= specified among variables
+	# No work if no dynldif_location= specified among variables
 	return LDAP_SUCCESS unless $location_name;
 
 	# If the location specification was found, replace variables with
-	# whatever is left after taking viper_location= out of the list, and
+	# whatever is left after taking dynldif_location= out of the list, and
 	# relocate the entry.
 	if( @variables!= @variables2) {
 		if( @variables2) {

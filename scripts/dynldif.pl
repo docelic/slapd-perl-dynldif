@@ -2,7 +2,7 @@
 use warnings;
 use strict;
 
-# Script showing how to run Viper as a standalone program, separate
+# Script showing how to run DynLDIF as a standalone program, separate
 # from slapd. Usage in this way is suitable if you want to read directory
 # data while circumventing slapd but still getting the exact same
 # results and code paths.
@@ -10,9 +10,9 @@ use strict;
 # Most notable use is running your search query of choice under Perl
 # profiler, such as one of:
 #
-#  perl -d:DProf     scripts/viper.pl; dprofpp
+#  perl -d:DProf     scripts/dynldif.pl; dprofpp
 #
-#  perl -d:SmallProf scripts/viper.pl; ./scripts/sprofpp
+#  perl -d:SmallProf scripts/dynldif.pl; ./scripts/sprofpp
 #
 # The script contains some hardcoded values, reflecting the specific
 # issue that was being profiled the last time the script was used.
@@ -21,10 +21,10 @@ use strict;
 # To make the script suit your purposes you will most probably want to
 # edit the source.
 #
-# To produce the exact same behavior as when running from slapd, Viper
+# To produce the exact same behavior as when running from slapd, DynLDIF
 # has to be initialized with the same config.
 # One way to do so is to initialize both with the same options.
-# Another option is to run a configured LDAP/Viper once, while having
+# Another option is to run a configured LDAP/DynLDIF once, while having
 # directive 'savedump FILE' at the end of database config. That will
 # produce a Storable dump of the database's config. Then, instead of
 # sending a series of ->config() directives seen below, you can just
@@ -34,14 +34,14 @@ use strict;
 # Crystal Labs, https://crystallabs.io/
 # Released under GPL v3.
 
-use Viper;
-package Viper;
+use DynLDIF;
+package DynLDIF;
 
-my $obj= Viper->new;
+my $obj= DynLDIF->new;
 p $obj;
 
 # Set base directory so that loaddump can operate
-$obj->config( 'directory', '/var/lib/ldap/viper');
+$obj->config( 'directory', '/var/lib/ldap/dynldif');
 
 # Load Storable dump of complete config
 $obj->config( 'loaddump',  'example.com.dump');

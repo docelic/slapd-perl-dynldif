@@ -6,14 +6,14 @@
 #
 # Usage:
 # First, generate smallprof.out:
-# perl -I. -d:SmallProf scripts/viper.pl
+# perl -I. -d:SmallProf scripts/dynldif.pl
 #
 # Then, print statistics based on it:
 # (By default, FILE is smallprof.out, and FIELD is 2 (wallclock time)):
 # perl scripts/sprofpp [FILE] [SORT_FIELD_NUMBER]
 #
 # Alternatively, you can use DProf and its existing dprofpp:
-# perl -I. -d:DProf scripts/viper.pl
+# perl -I. -d:DProf scripts/dynldif.pl
 # dprofpp
 #
 # Davor Ocelic <docelic@crystallabs.io>

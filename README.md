@@ -1,6 +1,6 @@
-# Slapd-viper Database Backend for OpenLDAP
+# slapd-perl-dynldif: Dynamic LDIF Backend for OpenLDAP
 
-`slapd-viper` is a flexible database backend for OpenLDAP. It has been in use since 2008.
+`slapd-perl-dynldif` is a flexible database backend for OpenLDAP. It has been in use since 2008.
 
 It implements all the usual LDAP operations, as well as provides elaborate features for responding with dynamic and auto-computed data on a level not seen in traditional LDAP installations.
 
@@ -12,19 +12,19 @@ It implements all the usual LDAP operations, as well as provides elaborate featu
 apt install slapd libfile-find-rule-perl libnet-ldap-perl libtext-csv-xs-perl liblist-moreutils-perl
 ```
 
-2. Obtain and run Viper with an example config file that provides suffix `dc=example,dc=com`:
+2. Obtain and run DynLDIF with an example config file that provides suffix `dc=example,dc=com`:
 
 ```sh
 cd /etc/ldap
-git clone https://github.com/crystallabs/slapd-viper
+git clone https://github.com/crystallabs/slapd-perl-dynldif
 
-/usr/sbin/slapd -d 256 -f ./slapd-viper/etc/ldap/slapd.conf
+/usr/sbin/slapd -d 256 -f ./slapd-perl-dynldif/etc/ldap/slapd.conf
 ```
 
 3. While the server is running, load example data into the tree:
 
 ```sh
-ldapadd -x -D cn=admin,dc=example,dc=com -w nevairbe -c -f slapd-viper/ldifs/example.ldif
+ldapadd -x -D cn=admin,dc=example,dc=com -w nevairbe -c -f slapd-perl-dynldif/ldifs/example.ldif
 ```
 
 4. And query the added data:
@@ -37,14 +37,14 @@ That's it for the most basic example.
 
 ## Overview
 
-`slapd-viper` is a custom backend for OpenLDAP built on top of OpenLDAP's `slapd-perl`.
+`slapd-perl-dynldif` is a custom backend for OpenLDAP built on top of OpenLDAP's `slapd-perl`.
 
-It stores the directory tree in files and directories on disk, by default under `/var/lib/ldap/viper/`.
+It stores the directory tree in files and directories on disk, by default under `/var/lib/ldap/dynldif/`.
 
 It can be used as a normal backend &mdash; reading and writing data is just the same as for any backend.
 However, its primary use is for LDAP trees which contain highly dynamic data and where elaborate and configurable server-side behavior is needed.
 
-Dynamic functions possible with `slapd-viper` are:
+Dynamic functions possible with `slapd-perl-dynldif` are:
 
 1. ADD operation can overwrite existing entries without throwing an error
 1. ADD operation can ignore adds for entries which already exist without throwing an error
@@ -63,22 +63,22 @@ Dynamic functions possible with `slapd-viper` are:
 
 ## Configuration Reference
 
-Each database backed by Viper should be configured with something similar to the following block in `slapd.conf`:
+Each database backed by DynLDIF should be configured with something similar to the following block in `slapd.conf`:
 
 ```
 database           perl
 suffix             "dc=example,dc=com"
-perlModulePath     "/etc/ldap/slapd-viper"
-perlModule         "Viper"
+perlModulePath     "/etc/ldap/slapd-perl-dynldif"
+perlModule         "DynLDIF"
 
-directory          "/var/lib/ldap/viper/"
+directory          "/var/lib/ldap/dynldif/"
 treesuffix         "dc=example,dc=com"
 ```
 
 The first four lines are required by `slapd` and its `back-perl` backend
-to configure the suffix and initialize Viper.
+to configure the suffix and initialize DynLDIF.
 
-The last two lines are required by the Viper backend. The value of
+The last two lines are required by the DynLDIF backend. The value of
 `treesufix` must be equal to `suffix`.
 This small duplication cannot
 be avoided because `suffix` directive is consumed by `slapd` and is not
@@ -129,7 +129,7 @@ Invoke removal of all saved stack files from disk.
 
 ##### deleteTrees 0|1
 
-Specify whether Viper should allow deleting non-leaf elements (deleting
+Specify whether DynLDIF should allow deleting non-leaf elements (deleting
 the entry and everything under it in one go).
 
 See notes for DELETE under "LDAP Operations - Notes".
@@ -145,7 +145,7 @@ See notes for BIND under "LDAP Operations - Notes".
 
 Specify file extension to use when storing server data on disk.
 
-Viper's data is kept in a directory tree that corresponds to the LDAP
+DynLDIF's data is kept in a directory tree that corresponds to the LDAP
 tree, where DN components are directories, and leaf nodes are files.
 Each file contains one LDAP entry in LDIF format.
 
@@ -173,13 +173,13 @@ Example: `message Test`
 ##### modifyCopyOnWrite 1|0
 
 When a MODIFY request is issued for an entry that does not really exist 
-(i.e. it comes from a fallback), specify whether Viper should copy the
+(i.e. it comes from a fallback), specify whether DynLDIF should copy the
 entry to the expected location and then modify it, or return
 LDAP_NO_SUCH_OBJECT.
 
 ##### modifySmarts 1|0
 
-Specify whether Viper should ignore MODIFY requests that do not result
+Specify whether DynLDIF should ignore MODIFY requests that do not result
 in any real change within the entry.
 
 This is useful to enable to detect "no-op" modifications and
@@ -209,7 +209,7 @@ Example: `save default_opts`
 Specify whether a missing or inaccessible schemaLDIF file should trigger
 a fatal error.
 
-It is vital for Viper to be aware of server's schema (which comes from
+It is vital for DynLDIF to be aware of server's schema (which comes from
 the `schemaLDIF` config option). The server won't work optimally if the schema
 file in LDIF format is missing, or is not up to date with the server's schema.
 
@@ -231,8 +231,8 @@ See the previous option for more info.
 
 Note that the schema in LDIF format does not eliminate the need to have the
 real schema files in `/etc/ldap/schema/*.schema`. Schema files are read by
-slapd, and schema LDIF file is read by Viper. LDIF is created on the 
-basis of real schema files, and at all times, Viper's LDIF schema should
+slapd, and schema LDIF file is read by DynLDIF. LDIF is created on the 
+basis of real schema files, and at all times, DynLDIF's LDIF schema should
 be in sync with slapd.
 
 Example: `schemaLDIF /etc/ldap/schema/schema.ldif`
@@ -263,7 +263,7 @@ is expanded with ${variable} if option "parse" is enabled.
 Specify an `entryAppend` rule, allowing adding extra attributes into an entry
 before returning it to the client.
 
-When all ATTRIBUTE-PATTERN pairs match, Viper looks to append the entry with
+When all ATTRIBUTE-PATTERN pairs match, DynLDIF looks to append the entry with
 a set of default attributes.
 
 The entry from which to import the attributes can be specified in two ways:
@@ -348,16 +348,16 @@ relative to the suffix base directory.
 
 This is an advanced option that should not be called from slapd.conf.
 
-It is intended for scenarios where Viper is at least once initialized by slapd
+It is intended for scenarios where DynLDIF is at least once initialized by slapd
 (and configured via slapd.conf), and config then dumped as Storable object
 using saveDump.
 
-After that, you can run Viper "standalone", directly under the Perl
-interpreter using <i>scripts/viper.pl</i>, and instead of re-parsing
+After that, you can run DynLDIF "standalone", directly under the Perl
+interpreter using <i>scripts/dynldif.pl</i>, and instead of re-parsing
 slapd.conf for configuration, simply send "loadDump FILE" to the config
-processor, to load the exact state as had by slapd/Viper.
+processor, to load the exact state as had by slapd/DynLDIF.
 
-This is almost always needed only when you want to run Viper under the Perl
+This is almost always needed only when you want to run DynLDIF under the Perl
 interpreter directly, to specify Perl debug or profiling options.
 
 ##### overlayConfig OVERLAY OPTION VALUE ...
@@ -401,7 +401,7 @@ Specify regexes that each entry DN must and must not match respectively, to have
 overlay "perl" run on its attributes.
 
 By default, Perl overlay is disabled as it is in fact an interface for
-"eval", and is considered dangerous. To activate it, open Viper.pm and
+"eval", and is considered dangerous. To activate it, open DynLDIF.pm and
 enable constant PERLEVAL.
 
 Example: `perl  .   ^$`
@@ -416,7 +416,7 @@ relative to the suffix base directory.
 This is an advanced option that should usually be called as the last
 line of slapd.conf configuration for a particular suffix.
 
-This is almost always needed only when you want to run Viper under the Perl
+This is almost always needed only when you want to run DynLDIF under the Perl
 interpreter directly, to specify Perl debug or profiling options.
 
 ##### searchFallback PATTERN REPLACEMENT
@@ -444,11 +444,11 @@ searchFallback  cn=.[^,\\s]+,ou=templates,.+  ou=templates,ou=defaults
 Specify searchSubst rule, allowing rewrite of any part of the search
 request.
 
-When the incoming search request matches all KEY PATTERN pairs, Viper
+When the incoming search request matches all KEY PATTERN pairs, DynLDIF
 performs the specified KEY=~ s/PATTERN/REPLACEMENT/ actions to rewrite
 the incoming search.
 
-Search rewriting is completely free-form, and it is possible to rewrite searches to a completely different Viper suffix, as long as both are located in the same base directory.
+Search rewriting is completely free-form, and it is possible to rewrite searches to a completely different DynLDIF suffix, as long as both are located in the same base directory.
 
 This is a legitimate feature of the rewrite model, and is officially used to
 rewrite incoming DHCP search queries under ou=dhcp to appropriate places
