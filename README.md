@@ -487,7 +487,15 @@ using saveDump.
 After that, you can run DynLDIF "standalone", directly under the Perl
 interpreter using <i>scripts/dynldif.pl</i>, and instead of re-parsing
 slapd.conf for configuration, simply send "loadDump FILE" to the config
-processor, to load the exact state as had by slapd/DynLDIF.
+processor, to load the exact state as had by slapd/DynLDIF. For example:
+
+```sh
+scripts/dynldif.pl -d /var/lib/ldap/dynldif -f example.com.dump \
+  -b ou=users,dc=example,dc=com -s one '(uid=*)' cn
+```
+
+It prints the results in LDIF, and exits with the LDAP result code. Run it
+with `--help` for all options.
 
 This is almost always needed only when you want to run DynLDIF under the Perl
 interpreter directly, to specify Perl debug or profiling options.
