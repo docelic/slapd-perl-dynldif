@@ -16,6 +16,7 @@ use POSIX        qw/WNOHANG/;
 use Time::HiRes  qw/sleep/;
 use Net::LDAP;
 use Net::LDAP::LDIF;
+use Net::LDAP::Schema;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_NO_SUCH_OBJECT LDAP_ALREADY_EXISTS
 	LDAP_TYPE_OR_VALUE_EXISTS LDAP_NO_SUCH_ATTRIBUTE LDAP_NOT_ALLOWED_ON_RDN
 	LDAP_OBJECT_CLASS_VIOLATION LDAP_NAMING_VIOLATION
@@ -320,6 +321,16 @@ subtest 'bad values are not fatal' => sub {
 		filter => '(objectClass=*)');
 	is( code( $r), LDAP_SUCCESS, 'entry with invalid regex in a value can be read');
 	is( code( $ldap->delete( "cn=bad,ou=hosts,$SUFFIX")), LDAP_SUCCESS, 'server still running');
+};
+
+subtest 'schema.pl' => sub {
+	my $out= `$^X '$FindBin::Bin/../scripts/schema.pl' 127.0.0.1:$port 2>&1`;
+	is( $?, 0, 'schema retrieved') or diag( $out);
+	open my $fh, '>', "$dir/schema.ldif" or die;
+	print $fh $out;
+	close $fh;
+	my $schema= Net::LDAP::Schema->new( "$dir/schema.ldif");
+	ok( $schema && $schema->attribute( 'uidNumber'), 'and can be loaded');
 };
 
 subtest 'delete' => sub {
