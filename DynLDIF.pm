@@ -991,7 +991,7 @@ sub search {
 	my @matches= ();
 
 	my( $ret, $newbase, %ret);
-	my( $ldif, $entry);
+	my $entry;
 
 	# slapd expects results in LDIF, but our internal subinvocations basically
 	# always want entry results, not LDIF. So, in a direct call from slapd,
@@ -1004,8 +1004,8 @@ sub search {
 
 		# origdn is the original DN, which will be used for "." (dots" expansion
 		# in DN specs (i.e. cn=abc...)
-		( $ret, $newbase, $ldif, $entry)=
-			$this->load( $req{base}, qw/entry 1 ldif 1/, 'origdn', $req{origbase});
+		( $ret, $newbase, undef, $entry)=
+			$this->load( $req{base}, qw/entry 1/, 'origdn', $req{origbase});
 		if( $ret!= LDAP_SUCCESS) { $this->{level}-= 1; return $ret }
 
 		# If original search base was found, this is a no-op. Otherwise
@@ -1016,7 +1016,7 @@ sub search {
 		# in reverse order.
 		if( $this->filter_match( $filter, $entry, $as_ldif)) {
 			DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
-			unshift @matches, $as_ldif? $ldif: $entry;
+			unshift @matches, $as_ldif? $this->e2ldif( $entry->dn, $entry): $entry;
 		}
 
 		my $time= time;
@@ -1058,8 +1058,8 @@ sub search {
 						# (such as shown above). But if we go into tree subsearch,
 						# then each time we use DN of the entry found (treating it
 						# as a specific search base).
-						( $ret, undef, $ldif, $entry)= $this->load(
-							$_[2], qw/dnasfile 1/);
+						( $ret, undef, undef, $entry)= $this->load(
+							$_[2], qw/dnasfile 1 entry 1/);
 
 						return 0 unless $ret== LDAP_SUCCESS;
 						if( $this->filter_match( $filter, $entry, $as_ldif)) {
@@ -1070,7 +1070,8 @@ sub search {
 							}
 
 							DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
-							unshift @matches, $as_ldif? $ldif: $entry;
+							# (Entries are converted to LDIF only when they match)
+							unshift @matches, $as_ldif? $this->e2ldif( $entry->dn, $entry): $entry;
 						}
 
 						my $time= time;
@@ -2517,6 +2518,9 @@ sub filter_match {
 	my( $this, $filter, $entry, $protect)= @_;
 	my( $op, $args)= %$filter;
 
+	# (Once per entry)
+	$entry= DynLDIF::CharEntry->new( $entry) unless ref $entry eq 'DynLDIF::CharEntry';
+
 	if( $op eq 'and' or $op eq 'or') {
 		# Result that decides the outcome on its own
 		my $decisive= $op eq 'and' ? 0 : 1;
@@ -2545,7 +2549,7 @@ sub filter_match {
 	# Net::LDAP::FilterMatch (undef if no matching rule is available).
 	# Values are UTF-8, and are matched as characters (so that i.e.
 	# case-insensitive matching works for non-ASCII characters too).
-	my $r= $this->leaf_match( $op, $args, DynLDIF::CharEntry->new( $entry));
+	my $r= $this->leaf_match( $op, $args, $entry);
 	defined $r ? ( $r ? 1 : 0) : undef
 }
 
@@ -2584,10 +2588,15 @@ sub leaf_match {
 	my( $attr, $assertion);
 	if( $op eq 'substrings') {
 		$attr= $args->{type};
-		my @parts= @{ $args->{substrings}};
-		$assertion= join '.*', map { "\Q$_\E"} map { values %$_} @parts;
-		$assertion= "^$assertion" if exists $parts[0]{initial};
-		$assertion.= '$' if exists $parts[-1]{final};
+		# (Filters are copies made by decode_utf8_deep(), so the assertion
+		# can be kept in them)
+		$assertion= $args->{'x-assertion'}//= do {
+			my @parts= @{ $args->{substrings}};
+			my $a= join '.*', map { "\Q$_\E"} map { values %$_} @parts;
+			$a= "^$a" if exists $parts[0]{initial};
+			$a.= '$' if exists $parts[-1]{final};
+			$a
+		};
 	} else {
 		( $attr, $assertion)= @$args{qw/attributeDesc assertionValue/};
 	}
