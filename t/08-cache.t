@@ -65,4 +65,43 @@ subtest 'writes invalidate the cache' => sub {
 	no_warnings();
 };
 
+subtest 'cacheEntries' => sub {
+	my( $v, $dir)= new_dynldif();
+	my $file= data_file( $dir, $G);
+	is( get( $v, $G)->get_value( 'gidNumber'), 12000, 'read');
+	ok( ( grep { m{/ou=groups/cn=testuser\.ldif$}} keys %{ $v->{entry_cache}}), 'kept');
+
+	# Changes through the backend replace the file
+	is( $v->modify( $G, 'REPLACE', 'gidNumber', 5), LDAP_SUCCESS);
+	is( get( $v, $G)->get_value( 'gidNumber'), 5, 'modify');
+
+	# Changes by other programs, in place and with the same size
+	for my $n( 6, 7) {
+		open my $fh, '+<', $file or die;
+		my $data= do { local $/; <$fh> };
+		$data=~ s/^gidNumber: \d+$/gidNumber: $n/m or die;
+		seek $fh, 0, 0;
+		print $fh $data;
+		close $fh;
+		is( get( $v, $G)->get_value( 'gidNumber'), $n, "edited in place ($n)");
+	}
+
+	# Values changed by overlays etc. don't change the kept entries
+	my $e= get( $v, $G);
+	$e->replace( gidNumber=> 99);
+	is( get( $v, $G)->get_value( 'gidNumber'), 7, 'returned entries are copies');
+
+	# Limit
+	my( $v2)= new_dynldif([[ 'cacheEntries', 2 ]]);
+	search_entries( $v2, $SUFFIX);
+	ok( keys %{ $v2->{entry_cache}}<= 2, 'at most cacheEntries entries kept');
+	my( $v3)= new_dynldif([[ 'cacheEntries', 0 ]]);
+	search_entries( $v3, $SUFFIX);
+	is( scalar keys %{ $v3->{entry_cache}}, 0, 'cacheEntries 0');
+
+	is( DynLDIF->new->config( 'cacheEntries', 'x'), 89, 'invalid value');
+	warnings_like( qr/Invalid 'cacheEntries' value 'x'/);
+	no_warnings();
+};
+
 done_testing;

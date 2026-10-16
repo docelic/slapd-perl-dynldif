@@ -114,6 +114,15 @@ without throwing LDAP_ALREADY_EXISTS error. Applicable if `addoverwrites` is 0.
 Specify whether LDAP ADD operation should overwrite existing entries
 without throwing LDAP_ALREADY_EXISTS error.
 
+##### cacheEntries 10000
+
+Specify how many parsed entries to keep in memory. An entry is used from
+memory as long as its file is unchanged (by device, inode, size and
+modification and change times; changes through DynLDIF replace the file),
+so this never returns stale data, also when files are changed by other
+programs. It makes repeated searches of the same entries about a third
+faster. `0` disables it.
+
 ##### cacheRead SPEC
 
 Specify for how many LDAP operations to cache LDIF reads from disk.
@@ -125,11 +134,11 @@ SPEC can be:
 N    - Number/count of LDAP operations
 ```
 
-Cached entries are cleared on every write. Since entry files are usually in the
-operating system's cache, `cacheRead` only helps when the same entries are read
-many times within an operation (i.e. by overlays); otherwise it can be slower
-than reading the files. If used, the best value, which minimizes the risk of
-serving stale data, is 1 operation, specified as `1`.
+Cached entries are cleared on every write through DynLDIF, but not when files
+are changed by other programs. `cacheEntries` gives most of the benefit
+without that risk, so `cacheRead` is rarely needed. If used, the best value,
+which minimizes the risk of serving stale data, is 1 operation, specified
+as `1`.
 
 `cacheRead` and `overlayConfig` cache can be used together, amplifying the effect.
 

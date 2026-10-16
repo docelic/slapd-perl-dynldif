@@ -48,6 +48,7 @@ use Net::LDAP           qw//;
 use Text::CSV_XS        qw//;
 use List::MoreUtils     qw/any all firstidx uniq/;
 use Scalar::Util        qw/reftype/;
+use Time::HiRes         qw//;
 
 use subs                qw/p pd pc pcd po pod/;
 
@@ -131,7 +132,7 @@ our %SEARCH_PARAMS= map { $_=> 1} qw/base scope deref size time filter attrOnly/
 # Keys of the instance (see new()) that hold internal state, and are not
 # config directives
 our %INTERNAL= map { $_=> 1} qw/schema tmpdir stack standard_parse level
-	cache op_cache_valid start match_schema rule_cache expanding/;
+	cache op_cache_valid start match_schema rule_cache expanding entry_cache/;
 
 # Backend instance
 sub new {
@@ -236,6 +237,8 @@ sub new {
 		cache          => {},      # Cache for dn2leaf file reads & ldif parsing
 		op_cache_valid => {},      # Num-ops cache validity (per-overlay)
 		cacheread      => '',      # Num-ops cache validity (dn2leaf disk reads)
+		cacheentries   => 10000,   # Max. number of parsed entries kept
+		entry_cache    => {},      # Parsed entries, by file (see dn2leaf())
 
 		'start'        => [],      # Time of search start (array ID= search level)
 	};
@@ -600,6 +603,12 @@ sub config {
 		} elsif( $key eq 'var') {                   # SET VARIABLE
 			for( my $i= 0; $i< @val; $i+= 2) {
 				$this->{var}{$val[$i]}= [ $val[$i+1]];
+			}
+
+		} elsif( $key eq 'cacheentries') {          # PARSED ENTRIES CACHE
+			unless( defined $val[0] and $val[0]=~ /^\d+$/) {
+				warn "Invalid 'cacheEntries' value '@val' (expected a number of entries)\n";
+				return LDAP_PARAM_ERROR
 			}
 
 		} elsif( $key eq 'cacheread') {             # DISKREAD CACHE
@@ -2409,6 +2418,7 @@ sub dn2leaf {
 	}
 
 	my $open_type; # Used for printing in error message
+	my( $sig, $cached); # (See 'cacheEntries' below)
 
 	if( $opts{writeop}) {
 		# Data is written to a temporary file, which save() renames to $file
@@ -2422,15 +2432,29 @@ sub dn2leaf {
 		}
 	}
 	elsif( $opts{openfh}) {
-		$open_type= 'rd';
-		$fh= IO::File->new( $file, '<');
-		unless( defined $fh) {
-			warn "Can't rdopen '$file' ($!)\n";
-			return LDAP_OPERATIONS_ERROR
+		# Parsed entries are kept ('cacheEntries'), and used as long as their
+		# file is the same. (Writes replace files, so they get a new inode.)
+		if( $opts{entry} and $this->{cacheentries}) {
+			my @st= Time::HiRes::stat( $file);
+			$sig= join ':', @st[0, 1, 7, 9, 10] if @st; # dev ino size mtime ctime
+			my $c= $sig && $this->{entry_cache}{$file};
+			if( $c and $c->[0] eq $sig) {
+				$entry= copy_entry( $c->[1]);
+				$cached= 1;
+			}
 		}
-		unless( flock $fh, LOCK_SH) {
-			warn "Can't flock_SH rdopened '$file' ($!)\n";
-			return LDAP_OPERATIONS_ERROR
+
+		unless( $cached) {
+			$open_type= 'rd';
+			$fh= IO::File->new( $file, '<');
+			unless( defined $fh) {
+				warn "Can't rdopen '$file' ($!)\n";
+				return LDAP_OPERATIONS_ERROR
+			}
+			unless( flock $fh, LOCK_SH) {
+				warn "Can't flock_SH rdopened '$file' ($!)\n";
+				return LDAP_OPERATIONS_ERROR
+			}
 		}
 	}
 
@@ -2454,6 +2478,12 @@ sub dn2leaf {
 			warn "Can't ${open_type}close '$file' ($!)\n";
 			return LDAP_OPERATIONS_ERROR
 		}
+
+		if( $sig) {
+			my $cache= $this->{entry_cache};
+			%$cache= () if keys %$cache>= $this->{cacheentries};
+			$cache->{$file}= [ $sig, copy_entry( $entry) ];
+		}
 	}
 
 	# If here, cache result. Caching enabled with cacheRead directive
@@ -2471,6 +2501,21 @@ sub dn2leaf {
 	@$ret{qw/file fh directory entry/}= ( $file, $fh, $directory, $entry);
 
 	LDAP_SUCCESS
+}
+
+# Copy of an entry. (Net::LDAP::Entry's clone() is several times slower, as
+# it builds the copy with add(); this copies its data structure directly.)
+sub copy_entry {
+	my( $e)= @_;
+	bless {
+		changetype=> $e->{changetype},
+		changes   => [],
+		asn       => {
+			objectName=> $e->{asn}{objectName},
+			attributes=> [ map { +{ type=> $_->{type}, vals=> [ @{ $_->{vals}} ] } }
+				@{ $e->{asn}{attributes}} ],
+		},
+	}, ref $e
 }
 
 # Map DN components (in canonical form) to their file system names
