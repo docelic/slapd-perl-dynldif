@@ -123,6 +123,17 @@ subtest 'failing references' => sub {
 	is_deeply( expand( "\$ file \$ nosuchfile", '$ exp $ cn'), [ '', 't' ],
 		'file: missing file expands to empty value');
 	warnings_like( qr/Can't rdopen/);
+
+	# Invalid regexes come from data, so they must not be fatal
+	open my $fh, '>', "$dir/r.txt" or die;
+	print $fh "line\n";
+	close $fh;
+	is_deeply( expand( '$ file $ r.txt (', '$ exp $ cn'), [ '', 't' ],
+		'file: invalid regex expands to empty value');
+	warnings_like( qr/Invalid regex '\('/);
+	is_deeply( expand( '$ find if cn ( $ .. 2 0 0 0 (uid=testuser) 0 uid', '$ exp $ cn'),
+		[ 't' ], 'find: invalid regex in if drops the value');
+	warnings_like( qr/FindVal: invalid regex '\('/);
 	no_warnings();
 };
 

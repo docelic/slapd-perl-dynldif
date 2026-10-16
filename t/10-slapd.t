@@ -69,6 +69,7 @@ treeSuffix         "$SUFFIX"
 cacheRead          1
 enableBind         1
 expandVal          .   ^\$
+fileVal            .   ^\$
 debug              1
 
 access to attrs=userPassword
@@ -307,6 +308,18 @@ subtest 'DNs with special characters' => sub {
 	for( "cn=Smith\\, John Q", 'cn=JohnSmith', "cn=$name", 'cn=Doe\\, Jane') {
 		is( code( $ldap->delete( "$_,ou=users,$SUFFIX")), LDAP_SUCCESS, "delete $_");
 	}
+};
+
+subtest 'bad values are not fatal' => sub {
+	open my $fh, '>', "$dir/data/f.txt" or die;
+	print $fh "x\n";
+	close $fh;
+	is( code( $ldap->add( "cn=bad,ou=hosts,$SUFFIX", attrs => [ objectClass => 'device',
+		cn => 'bad', description => '$ file $ f.txt (' ])), LDAP_SUCCESS, 'add');
+	my $r= $ldap->search( base => "cn=bad,ou=hosts,$SUFFIX", scope => 'base',
+		filter => '(objectClass=*)');
+	is( code( $r), LDAP_SUCCESS, 'entry with invalid regex in a value can be read');
+	is( code( $ldap->delete( "cn=bad,ou=hosts,$SUFFIX")), LDAP_SUCCESS, 'server still running');
 };
 
 subtest 'delete' => sub {

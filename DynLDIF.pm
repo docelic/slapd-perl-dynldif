@@ -888,8 +888,10 @@ sub search {
 
 		do {
 			( $k, $v, $r)= ( $$rule[$i], $$rule[$i+1], $$rule[$i+2]);
-			$v=~ s/(?<!\\)\$\[(\d+)\]\[(\d+)\]/$stack[$1][$2]/g;
-			$r=~ s/(?<!\\)\$\[(\d+)\]\[(\d+)\]/$stack[$1][$2]/g;
+			# (Captured values come from the request, so they are inserted into
+			# the pattern literally)
+			$v=~ s{(?<!\\)\$\[(\d+)\]\[(\d+)\]}{quotemeta( $stack[$1][$2] // q{})}ge;
+			$r=~ s{(?<!\\)\$\[(\d+)\]\[(\d+)\]}{$stack[$1][$2] // q{}}ge;
 
 			$req{$k}=~ s/$v/$r/; # <- substs performed here (XXX /g needed?)
 
@@ -1654,7 +1656,13 @@ sub run_overlays {
 											# used to always do the right thing regardless of !.
 											my $passed= $k=~ s/^!//;
 											my @vals= $e->get_value( $k);
-											if( any{ $_=~ /$v/} @vals) {
+											my $re= eval { qr/$v/ };
+											unless( $re) {
+												warn "FindVal: invalid regex '$v' in 'if'\n";
+												$comp= undef; # Drops the value
+												goto FIND_DONE
+											}
+											if( any{ $_=~ $re} @vals) {
 												$passed= !$passed;
 											}
 											if( not $passed) {
@@ -2804,9 +2812,14 @@ sub read_file {
 
 		@data= defined $data[$spec] ? ( $data[$spec]) : ();
 	} elsif( $spec) {
+		my $re= eval { qr/$spec/ };
+		unless( $re) {
+			warn "Invalid regex '$spec' for reading '$file'\n";
+			return LDAP_PARAM_ERROR
+		}
 		my @found;
 		for( @data) {
-			if( /$spec/) {
+			if( $_=~ $re) {
 				@found= ( defined $1 ? $1 : $_);
 				last
 			}
@@ -3726,6 +3739,23 @@ sub modrdn {
 	rmdir $directory if defined $directory;
 
 	LDAP_SUCCESS
+}
+
+# slapd (back-perl) terminates if the backend dies, so errors in operations
+# called by slapd are caught here and returned as LDAP_OTHER. (Internal
+# calls, marked by a trailing hashref, are not wrapped.)
+for my $op( qw/config init search add modify delete modrdn compare bind/) {
+	no strict 'refs';
+	no warnings 'redefine';
+	my $code= \&$op;
+	*$op= sub {
+		return $code->( @_) if @_> 1 and ref $_[-1] eq 'HASH';
+		my @ret= eval { $code->( @_) };
+		return wantarray ? @ret : $ret[0] unless $@;
+		( my $err= $@)=~ s/\s+$//;
+		warn "Internal error in $op: $err\n";
+		LDAP_OTHER
+	};
 }
 
 # Entry, as seen by Net::LDAP::FilterMatch in filter_match(): values that

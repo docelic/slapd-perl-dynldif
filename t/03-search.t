@@ -223,6 +223,21 @@ subtest 'searchSubst backreferences' => sub {
 	no_warnings();
 };
 
+subtest 'searchSubst captures are inserted literally' => sub {
+	# Captures come from the request, so regex characters in them must not
+	# be interpreted (an invalid regex would be fatal)
+	my( $v2)= new_dynldif([[ 'searchSubst',
+		'base', "^ou=([^,]+),ou=alias,$SUFFIX\$", '->',
+		'base', '^ou=$[0][0],ou=alias', 'ou=groups' ]]);
+	my( $ret, $dns)= search_dns( $v2, "ou=a(b,ou=alias,$SUFFIX", scope => 0);
+	is( $ret, LDAP_SUCCESS);
+	is_deeply( $dns, [ "ou=groups,$SUFFIX" ], 'regex characters matched literally');
+	( $ret, $dns)= search_dns( $v2, "ou=a.b,ou=alias,$SUFFIX", scope => 0);
+	is( $ret, LDAP_SUCCESS);
+	is_deeply( $dns, [ "ou=groups,$SUFFIX" ]);
+	no_warnings();
+};
+
 subtest 'searchFallback chain' => sub {
 	my( $v2)= new_dynldif([
 		[ 'searchFallback', '^cn=[^,]+,ou=hosts,', 'cn=site,ou=hosts,' ],
