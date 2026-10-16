@@ -107,6 +107,9 @@ our %S2L= (
 # run_overlays() within attribute's values.
 our @OVERLAYS= qw/file exp find perl/;
 
+# Placeholder for filter components that are undefined (see filter_match())
+our $UNDEFINED_ATTR= 'x-dynldif-undefined';
+
 # Attributes whose values are always hidden in debug output
 our @REDACT_ATTRS= qw/userPassword/;
 
@@ -845,8 +848,15 @@ sub search {
 	# search filter. Now we do filtering ourselves and we can do
 	# anything we want anywhere we want (with filter and all other search
 	# params), producing only final results for passing back onto slapd.
+	# slapd passes filter components that are undefined (i.e. invalid
+	# assertion value for the attribute's syntax) or computed as (?...).
+	# Undefined ones are evaluated as Undefined by filter_match().
+	( my $filterstr= $req{filter})=~ s/\(\?=true\)/(objectClass=*)/g;
+	$filterstr=~ s/\(\?=false\)/(!(objectClass=*))/g;
+	$filterstr=~ s/\(\?[^()]*\)/($UNDEFINED_ATTR=*)/g;
+
 	my $filter;
-	unless( $filter= Net::LDAP::Filter->new( $req{filter})) {
+	unless( $filter= Net::LDAP::Filter->new( $filterstr)) {
 		warn "Invalid filter '$req{filter}'\n";
 		$this->{level}-= 1;
 		return LDAP_FILTER_ERROR
@@ -878,7 +888,7 @@ sub search {
 
 		# We unshift because on return from Perl to ldap, data is read
 		# in reverse order.
-		if( $filter->match( $entry)) {
+		if( $this->filter_match( $filter, $entry, $as_ldif)) {
 			DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
 			unshift @matches, $as_ldif? $ldif: $entry;
 		}
@@ -921,7 +931,7 @@ sub search {
 						$_[2], qw/dnasfile 1/);
 
 					return $ret unless $ret== LDAP_SUCCESS;
-					if( $filter->match( $entry)) {
+					if( $this->filter_match( $filter, $entry, $as_ldif)) {
 						# Size limit is exceeded only when there's a match beyond it
 						goto SIZE_LIMIT if @matches>= $req{size};
 
@@ -2304,6 +2314,66 @@ sub redact_filter {
 		$this->attr_in( $2, $names) ? "($1$2$3$4*****)" : "($1$2$3$4$5)"
 	}ge;
 	$filter
+}
+
+# Evaluates filter on an entry with three-valued logic (RFC 4511, 4.5.1.7),
+# returning 1 (TRUE), 0 (FALSE) or undef (Undefined). Entries match when
+# the result is TRUE.
+# Components which slapd found undefined (passed as $UNDEFINED_ATTR, see
+# search()) are Undefined, and if $protect is true, so are components on
+# attributes listed in 'protectAttrs' (like slapd does for attributes the
+# client has no access to).
+sub filter_match {
+	my( $this, $filter, $entry, $protect)= @_;
+	my( $op, $args)= %$filter;
+
+	if( $op eq 'and' or $op eq 'or') {
+		# Result that decides the outcome on its own
+		my $decisive= $op eq 'and' ? 0 : 1;
+		my $undefined= 0;
+		for my $sub( @$args) {
+			my $r= $this->filter_match( $sub, $entry, $protect);
+			if( !defined $r) { $undefined= 1 }
+			elsif( $r== $decisive) { return $decisive }
+		}
+		return $undefined ? undef : 1- $decisive
+	}
+
+	if( $op eq 'not') {
+		my $r= $this->filter_match( $args, $entry, $protect);
+		return defined $r ? 1- $r : undef
+	}
+
+	my $attr= $op eq 'present' ? $args :
+		( $op eq 'substrings' or $op eq 'extensibleMatch') ? $args->{type} :
+		$args->{attributeDesc};
+
+	return undef if defined $attr and lc $attr eq $UNDEFINED_ATTR;
+	return undef if $protect and $this->attr_in( $attr, $this->protected_attrs);
+
+	# Leaf components are matched by Net::LDAP::FilterMatch. It returns
+	# undef if no matching rule is available. Values are UTF-8, and are
+	# matched as characters (so that i.e. case-insensitive matching works
+	# for non-ASCII characters too).
+	my $r= Net::LDAP::Filter::match( decode_utf8_deep( $filter),
+		DynLDIF::CharEntry->new( $entry), $this->{match_schema});
+	defined $r ? ( $r ? 1 : 0) : undef
+}
+
+# Copy of a data structure, with strings that are valid UTF-8 decoded
+# into characters
+sub decode_utf8_deep {
+	my( $data)= @_;
+	my $type= reftype( $data) // q{};
+	if( $type eq 'HASH') {
+		return { map { $_=> decode_utf8_deep( $data->{$_})} keys %$data }
+	} elsif( $type eq 'ARRAY') {
+		return [ map { decode_utf8_deep( $_)} @$data ]
+	} elsif( defined $data and !ref $data) {
+		my $chars= $data;
+		return utf8::decode( $chars) ? $chars : $data
+	}
+	$data
 }
 
 # Quick debug print. p(...)
