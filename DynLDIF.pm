@@ -3484,23 +3484,36 @@ Description: Specify value save location:
 }
 
 
-#
-# Yet to be ported over and coded properly
-#
-
+# Comparing attribute values. slapd passes the assertion as "attr=value".
+# The entry is loaded with load(), so dynamic values are compared the same
+# way as they would be returned by SEARCH, and matching is done in the
+# same way as for search filters.
 sub compare {
-    print {*STDERR} "Here in compare, @_\n";
-    my $this= shift;
-    my( $dn, $avaStr)= @_;
-    my $rc= 5;    # LDAP_COMPARE_FALSE
+	my( $this, $dn, $avaStr)= @_;
 
-    $avaStr=~ s/=/: /m;
+	$this->setup_state( \@_);
 
-    if( $this->{$dn}=~ /$avaStr/im) {
-        $rc= 6;    # LDAP_COMPARE_TRUE
-    }
+	$this->normalize( \$dn);
 
-    return $rc;
+	my( $attr, $value)= split /=/, $avaStr, 2;
+
+	DEBUG and p "COMPARE '$dn' $attr";
+
+	# Values of protected attributes can't be tested (see 'protectAttrs')
+	return LDAP_INSUFFICIENT_ACCESS
+		if $this->attr_in( $attr, $this->protected_attrs);
+
+	my( $ret, undef, undef, $entry)= $this->load( $dn, qw/entry 1/);
+	return $ret unless $ret== LDAP_SUCCESS;
+
+	return LDAP_NO_SUCH_ATTRIBUTE unless $entry->exists( $attr);
+
+	my $filter= Net::LDAP::Filter->new(
+		"($attr=". escape_filter_value( $value). ')');
+	return LDAP_OTHER unless $filter;
+
+	$this->filter_match( $filter, $entry) ?
+		LDAP_COMPARE_TRUE : LDAP_COMPARE_FALSE
 }
 
 # Renaming/moving entries. slapd passes DN, new RDN, deleteoldrdn flag, and

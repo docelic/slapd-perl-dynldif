@@ -560,6 +560,8 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 
 1. Search filters are evaluated with three-valued logic, as in RFC 4511: components that slapd marks as undefined (`(?...)`, i.e. a value that is invalid for the attribute's syntax), components on attributes without a matching rule in the schema, and components on attributes in `protectAttrs` are Undefined, and `!` of Undefined is still Undefined. Entries match only if the filter is TRUE.
 
+1. COMPARE operation is supported. The entry is loaded with all dynamic values, as it would be returned by SEARCH.
+
 1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`.
 
 1. ADD requires the entry to have an `objectClass` and to contain its RDN value. Other schema checks are not done.
