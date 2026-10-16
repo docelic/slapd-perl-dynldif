@@ -10,7 +10,7 @@ use MIME::Base64 qw/encode_base64/;
 use Encode qw//;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_ALREADY_EXISTS LDAP_NO_SUCH_OBJECT
 	LDAP_INVALID_DN_SYNTAX LDAP_NOT_ALLOWED_ON_NONLEAF LDAP_OBJECT_CLASS_VIOLATION LDAP_TYPE_OR_VALUE_EXISTS
-	LDAP_NAMING_VIOLATION LDAP_PROTOCOL_ERROR/;
+	LDAP_NAMING_VIOLATION LDAP_PROTOCOL_ERROR LDAP_OPERATIONS_ERROR/;
 
 my $host= "dn: cn=h1,ou=hosts,$SUFFIX\nobjectClass: device\ncn: h1\n";
 
@@ -152,6 +152,18 @@ subtest 'deleteTrees' => sub {
 	is( $v->delete( "ou=users,$SUFFIX"), LDAP_SUCCESS, 'non-leaf deleted');
 	ok( !-e "$dir/dc=com/dc=example/ou=users", 'subtree removed');
 	ok( !-e "$dir/dc=com/dc=example/ou=users.ldif", 'entry removed');
+
+	# Part of the tree can't be removed (i.e. files of another user)
+	{
+		no warnings 'redefine';
+		local *DynLDIF::rmtree= sub {
+			${ $_[1]{error}}= [{ "$_[0]/x.ldif"=> 'Permission denied' }];
+			0
+		};
+		is( $v->delete( "ou=groups,$SUFFIX"), LDAP_OPERATIONS_ERROR, 'failure');
+	}
+	ok( -e "$dir/dc=com/dc=example/ou=groups.ldif", 'entry kept');
+	warnings_like( qr{^DELETE: can't remove '.*/ou=groups/x.ldif' \(Permission denied\)$});
 	no_warnings();
 };
 

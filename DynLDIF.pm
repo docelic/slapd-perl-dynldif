@@ -1438,12 +1438,19 @@ sub delete {
 	return LDAP_NO_SUCH_OBJECT if !$ret{file} and !$ret{directory};
 
 	if( defined $ret{directory}) {
-		if( $this->{deletetrees}) { $ret= rmtree $ret{directory} }
-		else                   { $ret= rmdir $ret{directory} }
-
-		if( not $ret) {
-			return LDAP_OPERATIONS_ERROR if $!== 13;       # EACCESS
-			return LDAP_NOT_ALLOWED_ON_NONLEAF if $!== 39; # ENOTEMPTY
+		if( $this->{deletetrees}) {
+			# (The entry is kept if any part of the tree can't be removed)
+			rmtree( $ret{directory}, { error => \my $errors });
+			if( @$errors) {
+				for( @$errors) {
+					my( $file, $msg)= %$_;
+					warn "DELETE: can't remove '$file' ($msg)\n";
+				}
+				return LDAP_OPERATIONS_ERROR
+			}
+		} elsif( !rmdir $ret{directory}) {
+			return LDAP_NOT_ALLOWED_ON_NONLEAF if $!{ENOTEMPTY} or $!{EEXIST};
+			return LDAP_OPERATIONS_ERROR if $!{EACCES};
 			return LDAP_OTHER
 		}
 	}
