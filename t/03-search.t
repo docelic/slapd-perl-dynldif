@@ -221,7 +221,7 @@ subtest 'corrupt entry files are skipped' => sub {
 	mkdir $file=~ s{/[^/]+$}{}r;
 	for( [ "objectClass: device\ncn: x\n", qr/Invalid LDIF .* \(First line of LDIF entry does not begin with "dn:"\)/ ],
 		[ "dn: cn=bad,ou=hosts,$SUFFIX\nfoo\n", qr/Invalid LDIF .* \(illegal LDIF line 'foo'\)/ ],
-		[ '', qr/No LDIF data in/ ],
+		[ '', undef ], # (Empty files are placeholders, see t/00-init.t)
 	) {
 		my( $data, $warning)= @$_;
 		open my $fh, '>', $file or die;
@@ -230,7 +230,7 @@ subtest 'corrupt entry files are skipped' => sub {
 		my( $ret, $dns)= search_dns( $v2, $SUFFIX);
 		is( $ret, LDAP_SUCCESS, 'search succeeds');
 		is( scalar @$dns, 6, 'other entries found');
-		warnings_like( $warning);
+		warnings_like( $warning) if $warning;
 	}
 	no_warnings();
 };

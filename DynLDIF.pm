@@ -2371,7 +2371,9 @@ sub dn2leaf {
 
 	$opts{openfh}= 1 if $opts{entry} or $opts{ldif};
 
-	if( -e $file) {
+	# (Empty files are placeholders for components above the suffix, see
+	# init(), which can belong to another database using the same directory)
+	if( -s $file) {
 		if( $opts{writeop} and !$opts{overwrite}) {
 			p "DN2LEAF: WON'T OVERWRITE: '$dn'\n";
 			return LDAP_ALREADY_EXISTS

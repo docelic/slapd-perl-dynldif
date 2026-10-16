@@ -57,6 +57,26 @@ subtest 'empty extension is rejected' => sub {
 	no_warnings();
 };
 
+subtest 'databases in the same directory' => sub {
+	# Components above the suffix are created as empty placeholders, which
+	# don't prevent another database from storing them
+	my( $v, $dir)= new_dynldif( undef, empty => 1);
+	ok( -e "$dir/dc=com.ldif" && -z _, 'placeholder');
+	my $v2= DynLDIF->new;
+	$v2->config( 'directory', "$dir/");
+	$v2->config( 'treeSuffix', 'dc=com');
+	is( $v2->init, LDAP_SUCCESS);
+	my( $ret, $dns)= search_dns( $v2, 'dc=com', scope => 0);
+	is( $ret, 32, 'placeholder is not an entry');
+	add_ok( $v2, "dn: dc=com\nobjectClass: domain\ndc: com\n", LDAP_SUCCESS, 'suffix entry added');
+	( $ret, $dns)= search_dns( $v2, 'dc=com', scope => 0);
+	is_deeply( $dns, [ 'dc=com' ], 'and found');
+	add_ok( $v, "dn: $SUFFIX\nobjectClass: domain\ndc: example\n");
+	( $ret, $dns)= search_dns( $v2, 'dc=com');
+	is_deeply( $dns, [ 'dc=com', $SUFFIX ], 'other database entries below');
+	no_warnings();
+};
+
 subtest 'directory and treeSuffix are required' => sub {
 	my( $v, $dir)= new_dynldif( undef, empty => 1);
 
