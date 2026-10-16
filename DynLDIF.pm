@@ -3433,18 +3433,92 @@ sub compare {
     return $rc;
 }
 
+# Renaming/moving entries. slapd passes DN, new RDN, deleteoldrdn flag, and
+# optionally the new superior DN.
+# Like DELETE, this operates on actual entries, not taking fallbacks into
+# account. Only leaf entries can be renamed, since entries below would
+# keep their old DNs.
 sub modrdn {
-    print {*STDERR} "Here in modrdn, @_\n";
-    my $this= shift;
+	my( $this, $dn, $newrdn, $delFlag, $newsup)= @_;
 
-    my( $dn, $newdn, $delFlag)= @_;
+	# RDN values as given, to be added to the entry in original case
+	my @newavas= $this->rdn_avas( $newrdn);
+	return LDAP_INVALID_DN_SYNTAX unless @newavas and $newrdn!~ /^\s*$/;
 
-    $this->{$newdn}= $this->{$dn};
+	$this->normalize( \$dn);
+	$this->normalize( \$newrdn);
 
-    if( $delFlag) {
-        delete $this->{$dn};
-    }
-    return 0;
+	my( $oldrdn, $parent)= split /,/, $dn, 2;
+	if( defined $newsup and length $newsup) {
+		$this->normalize( \$newsup);
+		$parent= $newsup;
+	}
+	my $newdn= ( defined $parent and length $parent) ?
+		"$newrdn,$parent" : $newrdn;
+
+	DEBUG and p "MODRDN '$dn' -> '$newdn'";
+
+	return LDAP_SUCCESS if $newdn eq $dn;
+
+	my( $ret, %ret, %new);
+
+	$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
+	return $ret unless $ret== LDAP_SUCCESS;
+	my( $entry, $file)= @ret{qw/entry file/};
+
+	$ret= $this->dn2leaf( $dn, \%ret, qw/leaf 0 namesonly 1 verify 1/);
+	return $ret unless $ret== LDAP_SUCCESS;
+	my $directory= $ret{directory};
+
+	if( defined $directory) {
+		opendir my $dh, $directory or return LDAP_OPERATIONS_ERROR;
+		my @children= grep { !/^\.\.?$/} readdir $dh;
+		closedir $dh;
+		return LDAP_NOT_ALLOWED_ON_NONLEAF if @children;
+	}
+
+	$ret= $this->dn2leaf( $newdn, \%new, qw/leaf 0 namesonly 1 verify 1/);
+	return $ret unless $ret== LDAP_SUCCESS;
+	return LDAP_ALREADY_EXISTS if defined $new{file};
+
+	# Update RDN attribute values
+	if( $delFlag) {
+		for( $this->rdn_avas( $oldrdn)) {
+			my( $oldattr, $oldval)= @$_;
+			my @keep= $this->values_except( $entry, $oldattr, $oldval);
+			if( @keep) { $entry->replace( $oldattr=> [ @keep]) }
+			else       { $entry->delete( $oldattr) }
+		}
+	}
+
+	for( @newavas) {
+		my( $attr, $val)= @$_;
+		$entry->add( $attr=> $val) unless
+			$this->has_rdn_value( $entry, "$attr=". escape_dn_value( $val));
+	}
+
+	$entry->dn( $newdn);
+
+	$ret= $this->save( $newdn, $entry, qw/overwrite 0/);
+	return $ret unless $ret== LDAP_SUCCESS;
+
+	unlink $file or return LDAP_OPERATIONS_ERROR;
+	rmdir $directory if defined $directory;
+
+	LDAP_SUCCESS
+}
+
+# Entry, as seen by Net::LDAP::FilterMatch in filter_match(): values that
+# are valid UTF-8 are decoded into characters
+package DynLDIF::CharEntry;
+
+sub new    { my( $class, $entry)= @_; bless { entry=> $entry}, $class }
+sub exists { $_[0]{entry}->exists( $_[1]) }
+sub dn     { DynLDIF::decode_utf8_deep( $_[0]{entry}->dn) }
+
+sub get_value {
+	my( $this, $attr)= @_;
+	map { DynLDIF::decode_utf8_deep( $_)} $this->{entry}->get_value( $attr)
 }
 
 1
