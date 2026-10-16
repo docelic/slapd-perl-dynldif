@@ -1782,9 +1782,8 @@ sub dn2leaf {
 	}
 
 	# First, split DN into filesystem path
-	my @paths= reverse( split ',', $dn);
-	#s{\.}{}g for @paths;# Dot is not allowed. Or well, it is, no probs.
-	s{/}{.}g for @paths; # Slashes are converted to dots
+	my @rdns= reverse( split ',', $dn);
+	my @paths= $this->rdns2paths( @rdns);
 
 	my $leaf;
 
@@ -1949,6 +1948,21 @@ sub dn2leaf {
 	@$ret{qw/file fh directory entry/}= ( $file, $fh, $directory, $entry);
 
 	LDAP_SUCCESS
+}
+
+# Map DN components (in canonical form) to their file system names
+sub rdns2paths {
+	my( $this, @rdns)= @_;
+	map { rdn2name( $_)} @rdns
+}
+
+# File system name of an RDN (in canonical form). As '/' can't be used in
+# file names, it is stored as '%2f' (and '%' as '%25').
+sub rdn2name {
+	my( $rdn)= @_;
+	$rdn=~ s/%/%25/g;
+	$rdn=~ s{/}{%2f}g;
+	$rdn
 }
 
 # Quick debug print. p(...)
