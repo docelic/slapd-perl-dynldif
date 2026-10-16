@@ -261,23 +261,27 @@ sub init {
 	# component.
 
 	my $dn= $this->{treesuffix};
+	$this->normalize( \$dn);
 
-	$dn=~ s/^.+?,\s*//; # Reduce DN to part of the path that needs to be there
-	
-	my( $ret, %ret);
+	# Reduce DN to part of the path that needs to be there. Suffixes with
+	# a single component (such as ou=defaults) have nothing leading up
+	# to them.
+	if( $dn=~ s/^.+?,//) {
+		my( $ret, %ret);
 
-	# Note: this return doesn't bail out on File not found because dn2leaf
-	# is called with namesonly param, so no actual checking is done.
-	$ret= $this->dn2leaf( "$dn", \%ret, qw/namesonly 1 leaf 0 writeop 1 create 1/);
-	return $ret unless $ret== LDAP_SUCCESS;
+		# Note: this return doesn't bail out on File not found because dn2leaf
+		# is called with namesonly param, so no actual checking is done.
+		$ret= $this->dn2leaf( "$dn", \%ret, qw/namesonly 1 leaf 0 writeop 1 create 1/);
+		return $ret unless $ret== LDAP_SUCCESS;
 
-	# Note: $dn=~ check is here to avoid the error message on 
-	# suffixes with a single component (such as ou=defaults)
-	if( $dn=~ qr/,/o and not -e $ret{file}) {
-		warn 'Components leading up to the tree suffix '.
-		"for $this->{treesuffix} are missing; ".
-			"create them and restart slapd.\n";
-		return LDAP_OPERATIONS_ERROR
+		# Note: $dn=~ check is here to avoid the error message on
+		# suffixes with two components (such as dc=example,dc=com)
+		if( $dn=~ qr/,/o and not -e $ret{file}) {
+			warn 'Components leading up to the tree suffix '.
+			"for $this->{treesuffix} are missing; ".
+				"create them and restart slapd.\n";
+			return LDAP_OPERATIONS_ERROR
+		}
 	}
 
 	## Now make symlinks for all virtual paths, unless present already.
@@ -1802,14 +1806,20 @@ sub dn2leaf {
 	if( $opts{writeop}) {
 		my $currdir= $this->{directory};
 		my @i= @paths;
+		my @r= @rdns;
+		my @done; # Components processed so far (to construct their DN)
 		while ( my $comp= shift @i) {
 
 			$currdir .= '/'.$comp;
 			my $currfile= $currdir . $this->{extension};
+			unshift @done, shift @r;
 
 			if( ! -r $currfile) {
 				if( $opts{create}) {
-					$this->save($comp, '');
+					# Must save under the full DN of the component, not just the
+					# component itself, or it ends up at the top of the tree.
+					my $ret= $this->save( join( ',', @done), '');
+					return $ret unless $ret== LDAP_SUCCESS;
 				} else {
 					p "DN2LEAF: -r '$currfile': $!\n";
 					return LDAP_NO_SUCH_OBJECT
