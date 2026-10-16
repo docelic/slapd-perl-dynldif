@@ -303,6 +303,11 @@ sub init {
 	# file, where references to objects are of course lost.
 	$this->{schema}||= new Net::LDAP::Schema;
 
+	# Schema to use for matching values (filters, comparisons), if loaded.
+	# Without it, values are compared case-insensitively.
+	$this->{match_schema}= ( () = $this->{schema}->all_attributes) ?
+		$this->{schema} : undef;
+
 	# Debconf-related init code
 	if( $this->{enableprompt}) {
 		my $ret= $this->debconf_initialize;
@@ -909,9 +914,8 @@ sub modify {
 	$this->setup_state( \@_);
 
 	# Normalize DN
+	my $odn= $dn;
 	$this->normalize( \$dn);
-
-	DEBUG and p "MODIFY '$dn': ". ( Dumper \@list);
 
 	my( $ret, $newdn, %ret, $fh, $entry, $orig);
 
@@ -937,6 +941,24 @@ sub modify {
 
 	( $entry, $fh)= @ret{qw/entry fh/};
 
+	# Entry from a fallback (to be copied to $dn if modified) gets its own
+	# RDN value in place of the fallback's
+	if( $newdn ne $dn) {
+		for( $this->rdn_avas( $newdn)) {
+			my( $fattr, $fval)= @$_;
+			my @keep= $this->values_except( $entry, $fattr, $fval);
+			if( @keep) { $entry->replace( $fattr=> [ @keep]) }
+			else       { $entry->delete( $fattr) }
+		}
+
+		# (Values as given, in original case)
+		for( $this->rdn_avas( $odn)) {
+			my( $attr, $val)= @$_;
+			$entry->add( $attr=> $val) unless
+				$this->has_rdn_value( $entry, "$attr=". escape_dn_value( $val));
+		}
+	}
+
 	$orig= $entry->clone; # For comparison when modifysmarts==1
 
 	# Indicator whether we opened another copy of the entry with load()
@@ -944,69 +966,84 @@ sub modify {
 	my $loaded= 0;
 	my $entry2;
 
+	my $mods= $this->parse_modlist( \@list);
+	unless( $mods) {
+		warn "MODIFY: invalid modification list for '$dn'\n";
+		return LDAP_OTHER
+	}
+	DEBUG and p "MODIFY '$dn': ". $this->redact_mods( $mods);
+
 	# Perform changes on the in-memory entry
-  while( @list > 0) {
-		my( $action, $key)= ( shift @list, shift @list);
-
-		my @values;
-		while( @list) {
-			# Ignore undefined values. If a key had only one value and it was
-			# undefined, it'll get deleted due to if( scalar @values) check below.
-			if( defined $list[0]) {
-				if( $list[0] !~ qr/^(ADD|DELETE|REPLACE)$/o) {
-					my $attr= shift @list;
-					push @values, $attr;
-
-					# Make sure that the attr we will operate on exists in the
-					# entry. Actually, if it's not there, we just try to load it
-					# from $entry2 and continue (it's still possible that it won't
-					# exist even after that). No error checking is done here, as
-					# that'll be handled by the actual modification routine below.
-					if( !$entry->exists( $attr)) {
-						# If we didn't load() yet, do it now. Note that this could be
-						# done more cleanly outside of the loop, but we don't want to
-						# open every entry twice unless there's a real need to operate
-						# on entry2.
-						if( !$loaded) {
-							( $ret, undef, undef, $entry2)= $this->load( $dn, qw/entry 1/);
-							return $ret unless $ret== LDAP_SUCCESS;
-						}
-
-						# Now, if the attribute does exist in $entry2, it means it's
-						# one of the appended attributes, so we add it to $entry, and
-						# the actual modification routine below can operate on it
-						# flawlessly.
-						# We also don't need to worry that get_value() will return an
-						# empty list because we have the exists() check.
-						if( $entry2->exists( $attr)) {
-							$entry->add( $attr=> $entry2->get_value( $attr));
-						}
-					}
-
-				} else {
-					last
-				}
-			} else {
-				shift @list
-			}
-		}
+	for my $mod( @$mods) {
+		# A key with no values (only undef) gets deleted due to the
+		# if( scalar @values) check below.
+		my( $action, $key, @values)= @$mod;
 
 		$action= lc $action;
 		next unless $key;
 
-		if( scalar @values) {
-			if( not $entry->$action( $key, [@values])) {
-				warn "Unable to perform $action($key, ...) on '$newdn'\n";
-				return LDAP_OPERATIONS_ERROR
+		# Make sure that the attr we will operate on exists in the
+		# entry. Actually, if it's not there, we just try to load it
+		# from $entry2 and continue (it's still possible that it won't
+		# exist even after that). No error checking is done here, as
+		# that'll be handled by the actual modification routine below.
+		if( scalar @values and !$entry->exists( $key)) {
+			# If we didn't load() yet, do it now. We don't want to open
+			# every entry twice unless there's a real need to operate
+			# on entry2.
+			if( !$loaded) {
+				( $ret, undef, undef, $entry2)= $this->load( $dn, qw/entry 1/);
+				return $ret unless $ret== LDAP_SUCCESS;
+				$loaded= 1;
+			}
+
+			# Now, if the attribute does exist in $entry2, it means it's
+			# one of the appended attributes, so we add it to $entry, and
+			# the actual modification routine below can operate on it
+			# flawlessly.
+			# We also don't need to worry that get_value() will return an
+			# empty list because we have the exists() check.
+			if( $entry2->exists( $key)) {
+				$entry->add( $key=> [ $entry2->get_value( $key)]);
 			}
 		}
-		else {
-			# If there are no values, delete key
-			if( not $entry->delete( $key)) {
-				warn "Unable to perform delete($key) on '$newdn'\n";
-				return LDAP_OPERATIONS_ERROR
+
+		if( $action eq 'add') {
+			# Values must not exist already
+			for my $value( @values) {
+				if( $this->matching_values( $key, $value, $entry->get_value( $key))) {
+					p "MODIFY: value of '$key' exists in '$dn'";
+					return LDAP_TYPE_OR_VALUE_EXISTS
+				}
 			}
+			$entry->add( $key=> [ @values]);
+
+		} elsif( $action eq 'delete') {
+			# Attribute, and values if given, must exist
+			return LDAP_NO_SUCH_ATTRIBUTE unless $entry->exists( $key);
+
+			my @current;
+			if( @values) {
+				@current= $entry->get_value( $key);
+				for my $value( @values) {
+					my %idx= map { $_=> 1} $this->matching_values( $key, $value, @current);
+					return LDAP_NO_SUCH_ATTRIBUTE unless %idx;
+					@current= @current[ grep { !$idx{$_}} 0.. $#current];
+				}
+			}
+			if( @current) { $entry->replace( $key=> [ @current]) }
+			else          { $entry->delete( $key) }
+
+		} else { # replace (no values deletes the attribute)
+			if( @values) { $entry->replace( $key=> [ @values]) }
+			else         { $entry->delete( $key) }
 		}
+	}
+
+	# RDN value can't be removed
+	if( $this->has_rdn_value( $orig, $dn) and !$this->has_rdn_value( $entry, $dn)) {
+		p "MODIFY: can't remove RDN value of '$dn'";
+		return LDAP_NOT_ALLOWED_ON_RDN
 	}
 
 	# Changes to the in-memory entry have been performed correctly.
@@ -1018,9 +1055,11 @@ sub modify {
 
 	# For comparison, set DN of old and new entry to be equal as that is not
 	# the point of difference we care about.
+	# (Entry stays with $dn, since that is also where it'll be saved, even
+	# if it was loaded from a fallback.)
 	$entry->dn( $dn);
+	$orig->dn( $dn);
 	$changed= 0 if $this->{modifysmarts} and $this->dequal( $entry, $orig);
-	$entry->dn( $newdn);
 
 	# If changed (true if we have (1) any request, or (2) modifySmarts== 1
 	# and real change has been detected.)
@@ -1043,7 +1082,8 @@ sub modify {
 
 		$ret= $this->dn2leaf( $dn, \%ret);
 		return $ret unless $ret== LDAP_SUCCESS;
-		$this->save( $dn, $entry, qw/overwrite 1 modify 1/);
+		$ret= $this->save( $dn, $entry, qw/overwrite 1 modify 1/);
+		return $ret unless $ret== LDAP_SUCCESS;
 	}
 
 	$this->{level}-= 1;
@@ -1051,6 +1091,20 @@ sub modify {
 	LDAP_SUCCESS
 }
 
+
+# Indices of @values that are equal to $assertion, according to the
+# equality matching rule of $attr (case-insensitive without schema)
+sub matching_values {
+	my( $this, $attr, $assertion, @values)= @_;
+
+	my $filter= Net::LDAP::Filter->new(
+		"($attr=". escape_filter_value( $assertion). ')') or return;
+
+	grep {
+		my $e= Net::LDAP::Entry->new( 'cn=x', $attr=> $values[$_]);
+		$filter->match( $e, $this->{match_schema})
+	} 0.. $#values
+}
 
 # Does entry contain the RDN value of (normalized) $dn?
 sub has_rdn_value {
@@ -1065,6 +1119,79 @@ sub has_rdn_value {
 		any { normalize_value( $_) eq $n} $entry->get_value( $attr)
 	} @avas
 }
+
+# Parse the flat list of modifications that back-perl passes to modify():
+#   ACTION, ATTR, VALUE..., ACTION, ATTR, VALUE..., ...
+# where ACTION is ADD, DELETE or REPLACE, and a modification without values
+# has a single undef instead. Returns arrayref of [ ACTION, ATTR, VALUES... ]
+# or undef if the list can't be parsed.
+#
+# Since there are no value counts, a value equal to an action name is
+# ambiguous. What slapd guarantees resolves most cases: every action is
+# followed by an attribute name and then by at least one value (or undef).
+# Attribute names are also checked against the schema, if loaded. Where
+# both readings are still possible, a new modification is assumed.
+sub parse_modlist {
+	my( $this, $list)= @_;
+
+	my $attr_re= qr/^(?:[a-z][a-z0-9-]*|\d+(?:\.\d+)+)(?:;[a-z0-9-]+)*$/i;
+	my $schema= $this->{schema};
+	my $check_schema= $schema ? scalar( () = $schema->all_attributes) : 0;
+
+	# Can a modification start at position $i?
+	my $is_start= sub {
+		my( $i)= @_;
+		my( $action, $attr)= @$list[ $i, $i+ 1];
+		return 0 unless defined $action and $action=~ /^(?:ADD|DELETE|REPLACE)$/;
+		return 0 unless defined $attr and $attr=~ $attr_re and
+			$attr!~ /^(?:ADD|DELETE|REPLACE)$/;
+		return 1 unless $check_schema;
+		( my $type= $attr)=~ s/;.*//;
+		$schema->attribute( $type) ? 1 : 0
+	};
+
+	my( %memo, $parse, $allow_empty);
+	$parse= sub {
+		my( $i)= @_;
+		return [] if $i== @$list;
+		return $memo{$i} if exists $memo{$i};
+		return $memo{$i}= undef unless $is_start->( $i);
+
+		my( $action, $attr)= @$list[ $i, $i+ 1];
+		my $j= $i+ 2; # First value
+
+		if( $j< @$list and !defined $list->[$j]) {
+			my $rest= $parse->( $j+ 1);
+			return $memo{$i}= $rest && [[ $action, $attr], @$rest];
+		}
+
+		# Values are $j .. $k-1, and next modification starts at $k.
+		# Try the earliest possible $k first.
+		for my $k( $j+ 1 .. scalar @$list) {
+			next if $k< @$list and !$is_start->( $k);
+			my $rest= $parse->( $k) or next;
+			return $memo{$i}= [[ $action, $attr, @$list[ $j.. $k- 1]], @$rest];
+		}
+
+		# DELETE/REPLACE without values and without undef (as older back-perl
+		# versions may pass it) is only considered if nothing else parses
+		if( $allow_empty and $action ne 'ADD') {
+			my $rest= $parse->( $j);
+			return $memo{$i}= [[ $action, $attr], @$rest] if $rest;
+		}
+		$memo{$i}= undef
+	};
+
+	my $mods= $parse->( 0);
+	if( !$mods) {
+		%memo= ();
+		$allow_empty= 1;
+		$mods= $parse->( 0);
+	}
+	undef $parse; # Break reference cycle
+	$mods
+}
+
 
 # Deleting entries
 sub delete {
@@ -1780,13 +1907,17 @@ sub resolve {
 				p "RESOLVE: TRY FALLBACK TO '$base'";
 
 				$ret= $this->dn2leaf( $base, $oret, %opts);
-				last if $ret== LDAP_SUCCESS;
+				if( $ret== LDAP_SUCCESS) {
+					$obase= $base;
+					last
+				}
 			}
 		}
 	}
 
 	# Return what we have, either the entry was there, or it came
-	# from some fallback, or if none of that worked, empty values.
+	# from some fallback (in which case DN of the fallback is returned),
+	# or if none of that worked, empty values.
 	( $ret, $obase)
 }
 
@@ -2503,9 +2634,9 @@ sub save {
 	$ret= $this->dn2leaf( $dn, \%ret,
 		qw/writeop 1/, 'overwrite', $this->{addoverwrites}, %opts);
 
-	if( $ret!= LDAP_SUCCESS and !$opts{modify}) {
+	if( $ret!= LDAP_SUCCESS) {
 		return LDAP_SUCCESS if $ret== LDAP_ALREADY_EXISTS and
-			$this->{addignoredups};
+			$this->{addignoredups} and !$opts{modify};
 		return $ret
 	}
 

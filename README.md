@@ -559,3 +559,7 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 1. DNs are accepted with any characters, including escaped special characters (`cn=Smith\, John`), spaces and Unicode. They are compared case-insensitively, and returned in canonical form (see `extension`).
 
 1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`.
+
+1. MODIFY returns the standard result codes when adding a value that exists, deleting a value or attribute that does not exist, or removing the RDN value. Values are compared using the matching rules from the schema when `schemaLDIF` is configured, and case-insensitively otherwise. The same applies to search filters and COMPARE.
+
+1. MODIFY receives modifications from `slapd-perl` as a flat list, without value counts, so a value equal to `ADD`, `DELETE` or `REPLACE` is ambiguous. DynLDIF resolves this using what slapd guarantees about the list, and by checking attribute names against the schema when `schemaLDIF` is configured. Without the schema, a list in which a value equal to an action name is followed by a valid attribute name and further values is read as two modifications. (Resolving this fully would need `slapd-perl` to pass the number of values, which is a change to OpenLDAP.)
