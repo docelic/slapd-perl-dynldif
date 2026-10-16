@@ -161,6 +161,9 @@ subtest 'hashed passwords' => sub {
 	is( $v->modify( $U, 'REPLACE', 'userPassword', 'plain', $hashes[0]), LDAP_SUCCESS);
 	is( $v->bind( $U, 'plain'), LDAP_SUCCESS, 'any of multiple values');
 	is( $v->bind( $U, 'secret'), LDAP_SUCCESS, 'any of multiple values');
+
+	is( $v->modify( $U, 'REPLACE', 'userPassword', '', '{CLEARTEXT}'), LDAP_SUCCESS);
+	is( $v->bind( $U, ''), LDAP_INVALID_CREDENTIALS, 'empty values never match');
 	no_warnings();
 };
 

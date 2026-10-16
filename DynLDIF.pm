@@ -399,7 +399,9 @@ my %DIGESTS= ( SHA=> \&sha1, SHA256=> \&sha256, SHA384=> \&sha384,
 sub check_password {
 	my( $this, $pw, $stored)= @_;
 
-	return 0 unless defined $pw and defined $stored;
+	# (An empty password is an unauthenticated bind, RFC 4513 5.1.2, which
+	# slapd normally handles itself. It never matches here.)
+	return 0 unless defined $pw and length $pw and defined $stored and length $stored;
 
 	my( $scheme, $hash)= $stored=~ /^\{([^}]+)\}(.*)$/s
 		or return _equal( $pw, $stored);
