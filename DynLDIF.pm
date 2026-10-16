@@ -3248,9 +3248,16 @@ sub relocate {
 		}
 	}
 
-	# Finally, save, and delete old entry if it was relocated.
+	# Finally, save, and delete old entry if it was relocated. (If saving
+	# fails, the old entry is kept.)
 	$entry->dn( $newdn);
-	$this->save( $newdn, $entry);
+	my $ret= $this->save( $newdn, $entry,
+		$newdn eq $dn ? ( overwrite => 1) : ());
+	if( $ret!= LDAP_SUCCESS) {
+		warn "Can't relocate '$dn' to '$newdn' ($ret), keeping it in place\n";
+		$entry->dn( $dn);
+		return LDAP_SUCCESS
+	}
 	$this->delete( $dn) if $newdn ne $dn;
 
 	LDAP_SUCCESS
