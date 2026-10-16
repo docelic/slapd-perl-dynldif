@@ -1776,9 +1776,13 @@ sub run_overlays {
 									# OVERLAY FIND / SUBSEARCH
 									} elsif( $ovl eq 'find') { # findval
 									
-										# Do not operate on the attribute if this is not the
-										# first level search (direct entry).
-										next if $this->{level}> 0;
+										# Searches are not nested further: in a search made by
+										# this overlay, values with 'find' are dropped (instead of
+										# being returned with the specification).
+										if( $this->{level}> 0) {
+											$comp= undef;
+											goto FIND_DONE
+										}
 
 										if( $opts{if}) {
 											my( $k, $v)= @{ $opts{if}};

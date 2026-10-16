@@ -489,7 +489,9 @@ is the string used to join all of the entry's values. GVALX does the same
 for the results of all entries. A joiner of `\x00` gives multiple values
 instead (one value for each, keeping the text around the specification),
 and if several parts of a value do that, one value for each combination.
-Values that come out the same are returned once.
+Values that come out the same are returned once. Searches are not nested:
+in the entries that "find" searches through, values that use "find"
+themselves are left out.
 
 BASE (and DNs in "exp" and in `entryAppend ... -> attr`) can end with dots,
 which stand for that many last components of the entry's DN. For example,

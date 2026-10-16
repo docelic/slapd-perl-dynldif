@@ -90,6 +90,14 @@ subtest 'find' => sub {
 		'several multi-valued components give all combinations');
 	is_deeply( expand( '$ find $ .. 2 0 0 0 (gidNumber=12000) 0 gidNumber \x00 \x00'),
 		[ 12000 ], 'values are distinct');
+
+	# Entries found by find, with values that use find themselves
+	my $N= "cn=nested,ou=hosts,$SUFFIX";
+	add_ok( $v, "dn: $N\nobjectClass: device\ncn: nested\n".
+		"l: \$ find \$ .. 2 0 0 0 (uid=testuser) 0 uid\nl: plain\n");
+	is_deeply( expand( '$ find $ .. 2 0 0 0 (cn=nested) 0 l \x00 \x00'), [ 'plain' ],
+		'searches are not nested, and values that would be are dropped');
+	is( $v->delete( $N), LDAP_SUCCESS);
 	is_deeply( expand( '$ find $ ou=users,.. 2 0 0 0 (uid=testuser) 0 uid'),
 		[ 'testuser' ], 'relative base');
 
