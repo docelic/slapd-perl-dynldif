@@ -46,7 +46,7 @@ use File::Path          qw/rmtree mkpath/;
 use Fcntl               qw/:flock/;
 use Net::LDAP           qw//;
 use Text::CSV_XS        qw//;
-use List::MoreUtils     qw/any all firstidx/;
+use List::MoreUtils     qw/any all firstidx uniq/;
 use Scalar::Util        qw/reftype/;
 
 use subs                qw/p pd pc pcd po pod/;
@@ -1959,26 +1959,16 @@ sub run_overlays {
 							# took me good half a day of battling to barrel through.
 							#
 
-							my $refidx= firstidx{ ref} @comps; # Any comp with arrayref?
-							my @compstack;
-
-							# If we have an arrayref in the @comps list (meaning that we'll
-							# be expanding to multiple attributes)
-							if( $refidx>= 0) {
-								# Push [@comps] onto @compstack, expanding array values (i.e.
-								# arrayref with 4 values results in 4 [@comps] pushed onto
-								# compstack, each with one value from the arrayref).
-								# XXX Do we need to do this in a loop until all arrayrefs
-								# are expanded?
-								for ( @{ $comps[$refidx]}) {
-									push @compstack, [ @comps];
-									$compstack[ $#compstack][$refidx]= $_;
-								}
-
-							# If there was no arrayref in @comps, @compstack will have just
-							# one item, of course.
-							} else {
-								@compstack= ( [ @comps]);
+							# Each component that is an arrayref is expanded into its values,
+							# producing one list of components (pushed onto @compstack) for
+							# each combination of values. (Without arrayrefs, @compstack
+							# will have just the one list, of course.)
+							my @compstack= ( [ @comps]);
+							for my $idx( grep { ref $comps[$_]} 0.. $#comps) {
+								@compstack= map {
+									my $list= $_;
+									map { my @c= @$list; $c[$idx]= $_; \@c } @{ $comps[$idx]}
+								} @compstack;
 							}
 
 							# Now, for every line on compstack, load it and go into
@@ -2046,8 +2036,10 @@ sub run_overlays {
 
 					} # FOR my $v
 
-					# Finally, peddle @v2 to the attribute as its values
-					$e->replace( $a, [ @v2 ]);
+					# Finally, peddle @v2 to the attribute as its values. (Values
+					# must be distinct, but i.e. a search can return the same value
+					# from many entries.)
+					$e->replace( $a, [ uniq @v2 ]);
 					last # As soon as regex matched and overlay ran, we're done with it.
 
 				} # IF $cond matched

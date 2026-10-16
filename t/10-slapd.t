@@ -185,6 +185,14 @@ subtest 'limits' => sub {
 	$r= $ldap->search( base => $SUFFIX, timelimit => 1, filter => '(objectClass=*)');
 	is( code( $r), LDAP_SUCCESS, 'time limit counts from the start of the search');
 	is( code( $ldap->delete( $T)), LDAP_SUCCESS);
+
+	# Same value from several entries (gidNumber of the user and the group)
+	is( code( $ldap->add( $T, attrs => [ objectClass => 'device', cn => 't',
+		l => '$ find $ .. 2 0 0 0 (gidNumber=12000) 0 gidNumber \x00 \x00' ])), LDAP_SUCCESS);
+	$r= $ldap->search( base => $T, scope => 'base', filter => '(objectClass=*)');
+	is( $r->count, 1, 'entry with values found more than once');
+	is_deeply( [ $r->count ? $r->entry( 0)->get_value( 'l') : () ], [ 12000 ], 'returned once');
+	is( code( $ldap->delete( $T)), LDAP_SUCCESS);
 };
 
 subtest 'modify' => sub {

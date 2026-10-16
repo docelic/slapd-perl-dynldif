@@ -84,6 +84,12 @@ subtest 'find' => sub {
 	is_deeply( [ sort { $a cmp $b} @{ expand( "pre $find 0 \\x00")} ],
 		[ 'pre Test User', 'pre testuser' ],
 		'multiple values keep surrounding text');
+	my $ous= '$ find $ .. 2 0 0 0 (objectClass=organizationalUnit) 0 ou \x00 \x00';
+	is_deeply( [ sort { $a cmp $b} @{ expand( "$find \\x00 \\x00 \$ / $ous")} ],
+		[ map { my $v= $_; map { "$v / $_"} qw/groups hosts users/ } 'Test User', 'testuser' ],
+		'several multi-valued components give all combinations');
+	is_deeply( expand( '$ find $ .. 2 0 0 0 (gidNumber=12000) 0 gidNumber \x00 \x00'),
+		[ 12000 ], 'values are distinct');
 	is_deeply( expand( '$ find $ ou=users,.. 2 0 0 0 (uid=testuser) 0 uid'),
 		[ 'testuser' ], 'relative base');
 
