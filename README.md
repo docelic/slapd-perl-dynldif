@@ -473,6 +473,21 @@ difference -- with "exp", you generally know where the entry and attribute
 to expand to are located. With "find", you generally don't, so you perform
 a search to find them.
 
+The specification in a value is
+`$ find $ BASE SCOPE DEREF SIZE TIME FILTER ATTRONLY ATTR [VALX [GVALX]]`.
+ATTR is the attribute whose values are taken from the entries found. VALX
+selects a value of each entry by index (default 0), or if it is not a number,
+is the string used to join all of the entry's values. GVALX does the same
+for the results of all entries. A joiner of `\x00` gives multiple values
+instead (one value for each, keeping the text around the specification),
+and if several parts of a value do that, one value for each combination.
+Values that come out the same are returned once.
+
+BASE (and DNs in "exp" and in `entryAppend ... -> attr`) can end with dots,
+which stand for that many last components of the entry's DN. For example,
+in `cn=t,ou=hosts,dc=example,dc=com`, `ou=users,..` is
+`ou=users,dc=example,dc=com`.
+
 Example: `find  .   ^$`
 
 ##### loadDump FILE
@@ -643,9 +658,11 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 
 1. Search filters are evaluated with three-valued logic, as in RFC 4511: components that slapd marks as undefined (`(?...)`, i.e. a value that is invalid for the attribute's syntax), components on attributes without a matching rule in the schema, and components on attributes in `protectAttrs` are Undefined, and `!` of Undefined is still Undefined. Entries match only if the filter is TRUE.
 
+1. Search size and time limits are the ones slapd passes (from the request and from `sizelimit`/`timelimit` and `limits` in `slapd.conf`). When there is no limit, as for the `rootdn`, all entries are returned.
+
 1. COMPARE operation is supported. The entry is loaded with all dynamic values, as it would be returned by SEARCH.
 
-1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`.
+1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`. If part of a subtree can't be removed, the operation fails and the entry itself is kept.
 
 1. ADD requires the entry to have an `objectClass`, to contain its RDN value, and values of each attribute to be distinct. Other schema checks are not done.
 

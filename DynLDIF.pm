@@ -891,7 +891,7 @@ sub search {
 
 		# Phase 1: see if all subst conditions match
 		do {
-			# XXX error ckin, make sure $i/$i+1 are valid
+			# (Rule syntax is validated in config())
 			( $k, $v)= ( $$rule[$i], $$rule[$i+1]);
 
 			# If rule matches, save eventual matches to @stack
@@ -1273,8 +1273,6 @@ sub modify {
 			}
 		}
 
-		$ret= $this->dn2leaf( $dn, \%ret);
-		return $ret unless $ret== LDAP_SUCCESS;
 		$ret= $this->save( $dn, $entry, qw/overwrite 1 modify 1/);
 		return $ret unless $ret== LDAP_SUCCESS;
 	}
@@ -2638,7 +2636,7 @@ sub run_appender {
 
 		# Phase 1: see if all append conditions match
 		do {
-			# XXX error ckin, make sure $i/$i+1 are valid
+			# (Rule syntax is validated in config())
 			( $k, $v)= ( $$rule[$i], $$rule[$i+1]);
 
 			my @cond;
