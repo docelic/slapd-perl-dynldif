@@ -56,4 +56,19 @@ is( $code, 2, 'invalid scope');
 ( $code, $dns, $out)= run( '-d', $dir, '-f', 'nosuch.dump');
 isnt( $code, 0, 'missing dump file');
 
+# A copy of the data directory (dump made for the original)
+{
+	require File::Temp;
+	my $copy= File::Temp::tempdir( CLEANUP => 1);
+	system( 'cp', '-a', "$dir/.", $copy)== 0 or die 'cp failed';
+	is( $v->delete( $U), 0, 'entry deleted in the original');
+	( $code, $dns, $out)= run( '-d', $copy, '-f', 'test.dump', '(uid=testuser)');
+	is( $code, 0) or diag( $out);
+	is_deeply( $dns, [ $U ], 'the given directory is searched');
+}
+
+( $code, $dns, $out)= run( '-d', $dir, '-f', 'test.dump', '(uid=');
+is( $code, 87, 'invalid filter exits with result code 87');
+like( $out, qr/Invalid filter/);
+
 done_testing;

@@ -68,6 +68,9 @@ for my $line(
 	[ 'directory', $o{directory} ],
 	# Load Storable dump of complete config
 	[ 'loaddump', $o{dump} ],
+	# The dump contains the directory slapd used; use the given one instead
+	# (i.e. for a copy of the data)
+	[ 'directory', $o{directory} ],
 	( defined $o{debug} ? [ 'debug', split ' ', $o{debug} ] : ()),
 ) {
 	my $ret= $obj->config( @$line);
