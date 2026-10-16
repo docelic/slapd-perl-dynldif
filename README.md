@@ -1,8 +1,14 @@
 # slapd-perl-dynldif: Dynamic LDIF Backend for OpenLDAP
 
-`slapd-perl-dynldif` is a flexible database backend for OpenLDAP. It has been in use since 2008.
+`slapd-perl-dynldif` is a flexible/dynamic Perl-based database backend for OpenLDAP.
 
-It implements all the usual LDAP operations, as well as provides elaborate features for responding with dynamic and auto-computed data on a level not seen in traditional LDAP installations.
+It implements the usual LDAP operations as well as provides elaborate features for responding with
+dynamic and auto-computed data not seen in traditional LDAP installations.
+
+Data is stored in LDIF files on disk.
+
+Slapd's `back-perl` backend integration is limited in a couple ways, so e.g. authentication is best
+done through other, non-Perl-based suffixes.
 
 ## Quick Start
 
@@ -115,7 +121,7 @@ No specification implies no cache.
 SPEC can be:
 
 ```
-X    - X LDAP operations
+N    - Number/count of LDAP operations
 ```
 
 Overall best value, which minimizes risk of serving stale data while reaching
@@ -125,7 +131,8 @@ noticeable optimization improvement (up to 25%), is 1 operation, specified as `1
 
 ##### clean
 
-Invoke removal of all saved stack files from disk.
+Invoke removal of all saved stack files from disk at the time of parsing this
+directive in the config file.
 
 ##### debug CATEGORY ...
 
