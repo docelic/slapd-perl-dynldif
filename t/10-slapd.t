@@ -391,6 +391,17 @@ subtest 'overlays do not expose protected data' => sub {
 	is( code( $ldap->delete( $X)), LDAP_SUCCESS);
 };
 
+subtest 'timestamps' => sub {
+	my $r= $ldap->search( base => $U, scope => 'base', filter => '(objectClass=*)', attrs => [ '+' ]);
+	my $e= $r->entry( 0);
+	like( $e && $e->get_value( 'createTimestamp'), qr/^\d{14}Z$/, 'createTimestamp');
+	like( $e && $e->get_value( 'modifyTimestamp'), qr/^\d{14}Z$/, 'modifyTimestamp');
+	$r= $ldap->search( base => $U, scope => 'base', filter => '(objectClass=*)');
+	ok( !$r->entry( 0)->exists( 'createTimestamp'), 'operational: not returned by default');
+	$r= $ldap->search( base => $SUFFIX, filter => '(createTimestamp>=20000101000000Z)', attrs => [ '1.1' ]);
+	ok( $r->count> 1, 'can be searched for');
+};
+
 subtest 'bad values are not fatal' => sub {
 	open my $fh, '>', "$dir/data/f.txt" or die;
 	print $fh "x\n";

@@ -317,6 +317,17 @@ be in sync with slapd.
 
 Example: `schemaLDIF /etc/ldap/schema/schema.ldif`
 
+##### timestamps 1|0
+
+Specify whether DynLDIF should maintain the `createTimestamp` and
+`modifyTimestamp` operational attributes (slapd does not do that for
+`slapd-perl`). ADD sets both, keeping values given by the client (i.e. when
+migrating data), and MODIFY and MODRDN update `modifyTimestamp` when the
+entry changes. Like other operational attributes, they are returned only
+when requested (i.e. with `+`). (`creatorsName` and `modifiersName` can't
+be maintained, since `slapd-perl` does not give the backend the identity
+of the client.)
+
 ##### treeSuffix SUFFIX
 
 This value should always match the value of `suffix` configured for the

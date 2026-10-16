@@ -193,6 +193,7 @@ sub new {
 		                           #  missing by default so that you can run server,
 		                           #  get schema, save it and have it on next start)
 		enablebind     => 0,       # Allow bind? Our implementation is minimal.
+		timestamps     => 1,       # Maintain createTimestamp and modifyTimestamp
 
 		# Features
 		enableappend   => 1,       # Append entries with other entries' attrs
@@ -842,6 +843,13 @@ sub add {
 	return LDAP_TYPE_OR_VALUE_EXISTS
 		if any { $this->has_duplicates( $_, $entry->get_value( $_))} $entry->attributes;
 
+	# (Values given by the client are kept, i.e. when migrating data)
+	if( $this->{timestamps}) {
+		my $now= timestamp();
+		$entry->add( createTimestamp=> $now) unless $entry->exists( 'createTimestamp');
+		$entry->add( modifyTimestamp=> $now) unless $entry->exists( 'modifyTimestamp');
+	}
+
 	$ret= $this->save( $dn, $entry);
 	return $ret unless $ret== LDAP_SUCCESS;
 
@@ -1309,6 +1317,13 @@ sub modify {
 					'(modifyCopyOnWrite == OFF)';
 				return LDAP_NO_SUCH_OBJECT
 			}
+		}
+
+		if( $this->{timestamps}) {
+			my $now= timestamp();
+			$entry->replace( modifyTimestamp=> $now);
+			# (A copy of a fallback entry is a new entry)
+			$entry->replace( createTimestamp=> $now) if $newdn ne $dn;
 		}
 
 		$ret= $this->save( $dn, $entry, qw/overwrite 1 modify 1/);
@@ -2841,6 +2856,12 @@ sub expand_dots {
 	}
 }
 
+# Current time in Generalized Time (for createTimestamp and modifyTimestamp)
+sub timestamp {
+	my @t= gmtime;
+	sprintf '%04d%02d%02d%02d%02d%02dZ', $t[5]+ 1900, $t[4]+ 1, @t[3, 2, 1, 0]
+}
+
 # Deep comparison of arbitrary structures
 sub dequal {
   my( $this, $a_ref, $b_ref)= @_;
@@ -3835,6 +3856,7 @@ sub modrdn {
 	}
 
 	$entry->dn( $newdn);
+	$entry->replace( modifyTimestamp=> timestamp()) if $this->{timestamps};
 
 	$ret= $this->save( $newdn, $entry, overwrite => $same);
 	return $ret unless $ret== LDAP_SUCCESS;
