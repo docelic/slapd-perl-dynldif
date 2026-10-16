@@ -1064,6 +1064,8 @@ sub delete {
 		unlink $ret{file} or return LDAP_OPERATIONS_ERROR
 	}
 
+	$this->clear_read_cache;
+
 	LDAP_SUCCESS
 }
 
@@ -1460,7 +1462,7 @@ sub run_overlays {
 								} elsif( $comp=~ /^$ovl\b/) {
 									$run= 1; # Operate on the next component
 
-									# Now extract any overlay options (i.e. exp cache 1o $ ...)
+									# Now extract any overlay options (i.e. exp cache 1 $ ...)
 									# Make sure that we remove overlay options and leave only
 									# overlay name in $comp (need to do it for the code that
 									# joins the whole thing back to a value to work properly).
@@ -1752,7 +1754,8 @@ sub dn2leaf {
 
 	my( $file, $fh, $directory, $entry);
 
-	my $key= join( '|', $dn, %opts);
+	# (Options must be sorted, hash order is not stable)
+	my $key= join( '|', $dn, map { "$_=$opts{$_}"} sort keys %opts);
 
 	# Check if we're in cache. Excellent how we can cut right in here.
 	if( exists $this->{cache}{'read'}{$this->{cacheread}}{$key}) {
@@ -2358,7 +2361,15 @@ sub save {
 		return LDAP_OPERATIONS_ERROR
 	}
 
+	$this->clear_read_cache;
+
 	LDAP_SUCCESS
+}
+
+# Data on disk has changed, so cached reads (cacheRead) are no longer valid
+sub clear_read_cache {
+	my( $this)= @_;
+	$_= {} for values %{ $this->{cache}{'read'} || {} };
 }
 
 # Entry 2 LDIF
