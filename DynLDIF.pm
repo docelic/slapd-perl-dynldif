@@ -361,8 +361,14 @@ sub bind {
 
 	p "BIND $dn"; # Print bind DN only, don't show $pw in log.
 
-	my ( $ret, undef, undef, $entry)= $this->load( $dn);
+	return LDAP_INVALID_DN_SYNTAX unless $this->valid_dn( $dn);
+
+	# Only the entry itself counts, not fallbacks (which would allow binding
+	# as any DN with a default entry's password) nor appended attributes.
+	my( $ret, %ret);
+	$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
 	return LDAP_INVALID_CREDENTIALS unless $ret== LDAP_SUCCESS;
+	my $entry= $ret{entry};
 
 	my @pws= $entry->get_value( 'userPassword');
 

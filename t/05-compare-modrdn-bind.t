@@ -8,7 +8,8 @@ use Test::More;
 use DynLDIFTest;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_NO_SUCH_OBJECT LDAP_ALREADY_EXISTS
 	LDAP_NOT_ALLOWED_ON_NONLEAF LDAP_COMPARE_TRUE LDAP_COMPARE_FALSE
-	LDAP_NO_SUCH_ATTRIBUTE LDAP_INVALID_CREDENTIALS LDAP_UNWILLING_TO_PERFORM/;
+	LDAP_NO_SUCH_ATTRIBUTE LDAP_INVALID_CREDENTIALS LDAP_UNWILLING_TO_PERFORM
+	LDAP_INVALID_DN_SYNTAX/;
 
 my $U= "uid=testuser,ou=users,$SUFFIX";
 my $G= "cn=testuser,ou=groups,$SUFFIX";
@@ -96,6 +97,19 @@ subtest 'bind' => sub {
 	is( $v->bind( $U, 'wrong'), LDAP_INVALID_CREDENTIALS, 'wrong password');
 	is( $v->bind( "uid=nosuch,ou=users,$SUFFIX", 'test'),
 		LDAP_INVALID_CREDENTIALS, 'nonexistent entry');
+	is( $v->bind( $U, ''), LDAP_INVALID_CREDENTIALS, 'empty password');
+	is( $v->bind( "UID=TestUser, ou=Users,$SUFFIX", 'test'), LDAP_SUCCESS,
+		'DN in other form');
+	is( $v->bind( 'uid=,,x', 'test'), LDAP_INVALID_DN_SYNTAX, 'invalid DN');
+
+	# Fallback entries can't be bound as (or any DN could be bound as with
+	# the default entry's password)
+	( $v)= new_dynldif([[ 'enableBind', 1 ],
+		[ 'searchFallback', '^cn=[^,]+,ou=hosts,', 'cn=default,ou=hosts,' ]]);
+	add_ok( $v, "dn: cn=default,ou=hosts,$SUFFIX\nobjectClass: device\ncn: default\nuserPassword: dflt\n");
+	is( $v->bind( "cn=default,ou=hosts,$SUFFIX", 'dflt'), LDAP_SUCCESS, 'default entry itself');
+	is( $v->bind( "cn=nosuch,ou=hosts,$SUFFIX", 'dflt'), LDAP_INVALID_CREDENTIALS,
+		'DN that only exists through a fallback');
 	no_warnings();
 };
 
