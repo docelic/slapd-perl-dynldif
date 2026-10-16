@@ -51,6 +51,10 @@ use Scalar::Util        qw/reftype/;
 
 use subs                qw/p pd pc pcd po pod/;
 
+# Evaluates code of the 'perl' overlay. (Defined here, before any lexical
+# variables, so that the code can't see or change variables of DynLDIF.)
+sub perl_eval { eval $_[0] }
+
 # Debug output goes to STDERR (slapd's log; run slapd in foreground to see
 # it, i.e. sudo -u openldap /usr/sbin/slapd -d 0). It is enabled with the
 # 'debug' config directive. Being process-wide, it applies to all databases
@@ -1855,8 +1859,15 @@ sub run_overlays {
 											goto PERL_DONE
 										}
 
-										# XXX Eval error handling, sandbox
-										$comp= eval $comp;
+										# (Not a sandbox, which is why the overlay is disabled
+										# by default)
+										$comp= perl_eval( $comp);
+										if( $@) {
+											( my $err= $@)=~ s/\s+$//;
+											warn "PerlEval: error in '$key' ($err)\n";
+											$comp= undef; # Drops the value
+											goto PERL_DONE
+										}
 
 										# If cacheref exists and $key is there, time for
 										# us to save key to cache.

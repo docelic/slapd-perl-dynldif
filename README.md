@@ -542,6 +542,10 @@ overlay "perl" run on its attributes.
 By default, Perl overlay is disabled as it is in fact an interface for
 "eval", and is considered dangerous. To activate it, add `enablePerl 1`.
 
+The code runs under `use strict`, and since `$` separates the parts of a value,
+it can't contain `$`. If evaluation fails, the value is dropped and the error
+is logged.
+
 Example: `perl  .   ^$`
 
 ##### saveDump FILE

@@ -81,6 +81,12 @@ subtest 'overlays' => sub {
 
 	( $v, $dir)= new_dynldif([ @OVERLAYS, [ 'enablePerl', 1 ]]);
 	is_deeply( expand( $v, '$ perl $ 6*7'), [ 42 ], 'enablePerl 1');
+	is_deeply( expand( $v, q{$ perl $ die "boom\n"}, '$ perl $ 1 +', '$ perl $ @comps= (); 1',
+		'$ perl $ 2'), [ 2 ], 'errors drop the value, internals are not visible');
+	warnings_like( qr/^PerlEval: error in 'die "boom\\n"' \(boom\)$/, 'error reported');
+	warnings_like( qr/^PerlEval: error in '1 \+' \(syntax error/);
+	warnings_like( qr/^PerlEval: error in '\@comps= \(\); 1' \(Global symbol "\@comps"/,
+		'(under strict)');
 
 	for my $ovl( [ enableExp => 0 ], [ enableFile => 1 ], [ enableFind => 2 ]) {
 		my( $switch, $i)= @$ovl;
