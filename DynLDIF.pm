@@ -1118,6 +1118,10 @@ sub run_overlays {
 	# attribute value's DN spec with components from the original entry.
 	$odn||= $e->dn;
 
+	# Entries being expanded, to detect circular references (an entry
+	# expanding to its own values, directly or via other entries).
+	local $this->{expanding}{ lc $e->dn}= 1;
+
 	# Find attributes that are not RAW and have at least one value that's
 	# a candidate for overlays run.
 	my @candidates=
@@ -1257,8 +1261,9 @@ sub run_overlays {
 											($dn, $attr, $valx)= @f;
 
 										} else {
-											p "EXPANDVAL: Invalid specification '$comp'";
-											return LDAP_PARAM_ERROR
+											warn "EXPANDVAL: Invalid specification '$comp'\n";
+											$comp= undef; # Drops the value
+											goto EXP_END
 										}
 
 										my $val_joiner;
@@ -1272,7 +1277,7 @@ sub run_overlays {
 											# Done this way because, with specifying \x20, I wasn't
 											# able to get \x20 back to ' ' (no amount of "$joiner" or
 											# sprintf %s, $joiner seemed to convert it back.
-											$val_joiner=~ s/\\x(\d+)/chr hex $1/ge;
+											$val_joiner=~ s/\\x([0-9a-fA-F]{2})/chr hex $1/ge;
 
 											$valx= undef;
 										}
@@ -1285,10 +1290,7 @@ sub run_overlays {
 										# Allow constructing the new DN from relative part
 										# and ending of the current entry's DN.
 										if( $dn) {
-											if( my $count= $dn=~ s/\.(?=\.*$)//g) {
-												$dn.= ( length $dn ? ',' : '').
-													join ',', (split(',', $odn))[-$count..-1];
-											}
+											$this->expand_dots( \$dn, $odn);
 											
 											$key= join( '|', $dn, $attr, $valx|| '');
 
@@ -1302,9 +1304,20 @@ sub run_overlays {
 										# If DN is set, we need to load it. If not, it means
 										# only one arg was given (attr name), defaulting to
 										# current entry.
+										if( $dn and $this->{expanding}{$dn}) {
+											warn "ExpandVal: circular reference to '$dn'\n";
+											$comp= undef; # Drops the value
+											goto EXP_END
+										}
 										if( $dn) {
 											( $ret,undef,undef,$ent)= $this->load( $dn, qw/entry 1/);
-											return $ret unless $ret== LDAP_SUCCESS;
+											# Failed lookup drops the value (and does not prevent
+											# other values from being expanded).
+											if( $ret!= LDAP_SUCCESS) {
+												warn "ExpandVal: can't load '$dn' ($ret)\n";
+												$comp= undef; # Drops the value
+												goto EXP_END
+											}
 										}
 
 										my @vals= $ent->get_value( $attr);
@@ -1329,6 +1342,8 @@ sub run_overlays {
 												"Wrong server schemas and/or schema.ldif file?\n";
 										}
 
+										EXP_END:
+
 									# OVERLAY FIND / SUBSEARCH
 									} elsif( $ovl eq 'find') { # findval
 									
@@ -1349,7 +1364,7 @@ sub run_overlays {
 											}
 											if( not $passed) {
 												$comp= undef;
-												goto FIND_DO_CACHE
+												goto FIND_DONE
 											}
 										}
 
@@ -1359,16 +1374,14 @@ sub run_overlays {
 										if( not $parser->parse( $comp)) {
 											warn q{Cannot parse '}. $parser->error_input.
 												q{. Reason: }. $parser->error_diag. "\n";
-												return LDAP_INVALID_SYNTAX
+											$comp= undef; # Drops the value
+											goto FIND_DONE
 										}
 
 										# @f= base scope deref size time filter attrOnly attr
 										@f= $parser->fields;
 
-										if( my $count= $f[0]=~ s/\.(?=\.*$)//g) {
-											$f[0].= ( length $f[0] ? ',' : '').
-												join ',', (split(',', $odn))[-$count..-1];
-										}
+										$this->expand_dots( \$f[0], $odn);
 
 										my $key= join( '|', @f);
 
@@ -1386,7 +1399,8 @@ sub run_overlays {
 										if( @f!= 8)  {
 											warn "Must specify 10 options for findVal overlay ".
 												"(have @f).\n";
-											return LDAP_INVALID_SYNTAX
+											$comp= undef; # Drops the value
+											goto FIND_DONE
 										}
 
 										# val_joiner is per-result
@@ -1400,7 +1414,7 @@ sub run_overlays {
 											# Done this way because, with specifying \x20, I wasn't
 											# able to get \x20 back to ' ' (no amount of "$joiner" or
 											# sprintf %s, $joiner seemed to convert it back.
-											$val_joiner=~ s/\\x(\d+)/chr hex $1/ge;
+											$val_joiner=~ s/\\x([0-9a-fA-F]{2})/chr hex $1/ge;
 
 											$valx= undef;
 										}
@@ -1409,13 +1423,17 @@ sub run_overlays {
 										my $gval_joiner;
 										if( $gvalx=~ qr/\D/o) {
 											$gval_joiner= $gvalx;
-											$gval_joiner=~ s/\\x(\d+)/chr hex $1/ge;
+											$gval_joiner=~ s/\\x([0-9a-fA-F]{2})/chr hex $1/ge;
 											$gvalx= undef;
 										}
 
 										# NOTE: MUST use {} as last arg to indicate subsearch.
-										my @entries= $this->search( @f, {});
-										return $_ unless ( ( $_= shift @entries)== LDAP_SUCCESS);
+										my( $sret, @entries)= $this->search( @f, {});
+										if( $sret!= LDAP_SUCCESS) {
+											warn "FindVal: search '@f' failed ($sret)\n";
+											$comp= undef; # Drops the value
+											goto FIND_DONE
+										}
 
 										# Super good. So what we have now is:
 										#
@@ -1446,8 +1464,6 @@ sub run_overlays {
 										} else {
 											$comp= join $gval_joiner, @comp;
 										}
-
-										FIND_DO_CACHE:
 
 										if( $opts{cacheref}) {
 											pc "Rebuilding cache value for FIND '$key'";
@@ -2106,14 +2122,14 @@ sub run_appender {
 
 				# Allow constructing the new DN from relative part
 				# and ending of the current entry's DN.
-				if( my $count= $dn=~ s/\.(?=\.*$)//g) {
-					$dn.= ( length $dn ? ',' : '').
-						join ',', (split(',', $e->dn))[-$count..-1];
-				}
+				$this->expand_dots( \$dn, $e->dn);
 
 				$this->normalize( \$dn);
 				$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
-				return $ret unless $ret== LDAP_SUCCESS;
+				if( $ret!= LDAP_SUCCESS) {
+					warn "EntryAppend: can't load '$dn' for '". $e->dn. "' ($ret)\n";
+					next
+				}
 
 				my $ae= $ret{entry};
 
@@ -2178,7 +2194,10 @@ sub run_appender {
 
 			$this->normalize( \$dn);
 			$ret= $this->dn2leaf( $dn, \%ret, qw/entry 1/);
-			return $ret unless $ret== LDAP_SUCCESS;
+			if( $ret!= LDAP_SUCCESS) {
+				warn "EntryAppend: can't load '$dn' for '". $e->dn. "' ($ret)\n";
+				next
+			}
 
 			my $ae= $ret{entry};
 
@@ -2234,6 +2253,21 @@ sub run_appender {
 
 }
 
+# Expand trailing dots in a DN specification to that many last components
+# of another DN. I.e. "cn=x,.." relative to "cn=y,dc=example,dc=com" gives
+# "cn=x,dc=example,dc=com" (comma before the dots is optional).
+sub expand_dots {
+	my( $this, $dnref, $base)= @_;
+
+	if( my $count= $$dnref=~ s/\.(?=\.*$)//g) {
+		$$dnref=~ s/,\s*$//;
+		my @comps= split ',', $base;
+		$count= @comps if $count> @comps;
+		$$dnref.= ( length $$dnref ? ',' : ''). join ',', @comps[ -$count.. -1]
+			if $count;
+	}
+}
+
 # Deep comparison of arbitrary structures
 sub dequal {
   my( $this, $a_ref, $b_ref)= @_;
@@ -2286,14 +2320,16 @@ sub read_file {
 	# is returned.
 	if( defined $spec and $spec=~ qr/^\d+$/o) {
 
-		@data= ();
-		@data= $data[$spec] if defined $data[$spec];
+		@data= defined $data[$spec] ? ( $data[$spec]) : ();
 	} elsif( $spec) {
+		my @found;
 		for( @data) {
 			if( /$spec/) {
-				@data= ( defined $1 ? $1 : $_)
+				@found= ( defined $1 ? $1 : $_);
+				last
 			}
 		}
+		@data= @found;
 	}
 
 	( LDAP_SUCCESS, @data)
