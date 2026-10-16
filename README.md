@@ -313,9 +313,74 @@ is expanded with ${variable} if option "parse" is enabled.
 
 #### Complex Configuration Directives
 
-##### addPrompt
+##### addPrompt MATCH PATTERN REPLACEMENT
 
-##### addRelocate
+Define where the server-side Debconf prompter should run.
+
+When a Debconf template is added to LDAP under a DN matching the regex MATCH,
+we can assume that its config value is already there (Debconf saves the
+config before the template), and that LDAP now has full information about
+the question.
+
+DynLDIF performs s/PATTERN/REPLACEMENT/ on the template DN to derive the
+exact location of the config question, and then opens a fully functional
+Debconf interface from the server to an X DISPLAY of choice.
+(In this scenario, the Debconf interface literally runs on the server.)
+
+This allows an administrator to configure client hosts with the
+Noninteractive Debconf frontend, and capture any new Debconf questions
+(arising from automatic or manual apt-get installs) on a single X display.
+
+Depending on how Debconf is configured on the client host, the admin can
+see and change Debconf values either after everything is already
+configured, which is useful but not optimal, or directly while the
+host is in the decision process, which is the best option.
+(The Debconf process on the client blocks waiting for the admin's input,
+and continues as it receives it.)
+
+The prompter is disabled by default. To use it, add `enablePrompt 1`. It
+needs Debconf with its LDAP driver (`Debconf/DbDriver/LDAP.pm`, part of
+Debian's `debconf` package), and `/etc/debconf.conf.pipe`, which is not
+included in this repository; startup fails if it is missing.
+
+Example: run the prompter for templates added under the usual Debconf tree:
+
+```
+addPrompt  cn=\\S+?,cn=\\w+,ou=templates,o=  ,ou=templates,  ,ou=hosts,
+```
+
+##### addRelocate LABEL PATTERN REPLACEMENT
+
+Define an entry relocation rule.
+
+When an LDAP-aware Debconf interface runs on the client host and encounters
+a new question, it can ask the admin for both the value and the location
+where the question should be saved in LDAP. That information is passed to
+the backend as `dynldif_location=LABEL` in the entry's `variables` attribute.
+
+If LABEL is defined, s/PATTERN/REPLACEMENT/ is performed on the entry's DN
+to derive the target location, and the entry is saved there instead
+(with `dynldif_location=` removed from `variables`). If the label is not
+defined (for example `Host`), the entry stays where it is.
+
+This is used for promoting host-specific values to site-wide or
+global defaults.
+
+Relocation is disabled by default. To use it, add `enableRelocate 1`.
+The server-side prompter (see `addPrompt`) uses the same
+rules, and relocates questions that need no input to `Site`.
+
+Example: define "Site" and "Global" labels:
+
+```
+addRelocate  Site    ,cn=\\S+?,ou=           ,ou=defaults,ou=
+addRelocate  Global  ,cn=\\S+?,ou=hosts,.+   ,ou=hosts,ou=defaults
+```
+
+With these, the host-specific entry
+`cn=pkg/question,cn=host1,ou=hosts,o=site1,ou=clients` is relocated to
+`cn=pkg/question,ou=defaults,ou=hosts,o=site1,ou=clients` (Site) or to
+`cn=pkg/question,ou=hosts,ou=defaults` (Global).
 
 ##### entryAppend ATTRIBUTE PATTERN ... -&gt; attr ATTRIBUTE [ATTRATTR [ATTR...]]
 ##### entryAppend ATTRIBUTE PATTERN ... -&gt; append PATTERN REPLACEMENT [ATTR...]
