@@ -104,7 +104,7 @@ Where applicable, the first value listed indicates the default value.
 
 #### Simple Configuration Directives
 
-##### addIgnoredups 0|1
+##### addIgnoreDups 0|1
 
 Specify whether LDAP ADD operation should ignore adds on existing entries
 without throwing LDAP_ALREADY_EXISTS error. Applicable if `addoverwrites` is 0.
@@ -135,8 +135,8 @@ serving stale data, is 1 operation, specified as `1`.
 
 ##### clean
 
-Invoke removal of all saved stack files from disk at the time of parsing this
-directive in the config file.
+Remove all files in `tmp/` under `directory` (saved stacks and dumps) at the
+time of parsing this directive in the config file.
 
 ##### debug CATEGORY ...
 
@@ -207,8 +207,9 @@ be used in file names, it is stored as `%2f` (and `%` as `%25`).
 
 ##### load FILE [PATTERN REPLACEMENT ...]
 
-Load and process configuration stack from FILE.
-FILE is always relative to suffix base directory.
+Load and process configuration stack from FILE (saved with `save`).
+FILE is in `tmp/` under `directory`, and can contain only letters, digits,
+`_` and `.`.
 
 If list of PATTERN REPLACEMENTS is specified, the s/PATTERN/REPLACEMENT/
 substitution is done on all loaded lines before sending them to the
@@ -277,7 +278,9 @@ Reset current stack in memory to empty list.
 
 ##### save FILE
 
-Save current stack to FILE, always relative to suffix base directory.
+Save current stack (the configuration lines since the start, or since the
+last `reset`) to FILE in `tmp/` under `directory`. FILE can contain only
+letters, digits, `_` and `.`.
 
 Example: `save default_opts`
 
@@ -316,7 +319,8 @@ Example: `schemaLDIF /etc/ldap/schema/schema.ldif`
 
 ##### treeSuffix SUFFIX
 
-This value should always match the value of `suffix` configured for the database.
+This value should always match the value of `suffix` configured for the
+database. It is required, as is `directory`.
 
 This small duplication cannot
 be avoided because `suffix` directive is consumed by `slapd` and is not
@@ -462,7 +466,9 @@ Specify regexes that each attribute name must and must not match respectively, t
 overlay "file" run on its attributes.
 
 The "file" overlay enables expansion into values of on-disk files, always
-relative to the suffix base directory.
+relative to `directory`. The specification is `$ file $ FILE [LINE|REGEX]`:
+the whole file, or the line with the given number (from 0), or the first
+line that matches REGEX (or its first capture group).
 
 Entry files (with the `extension`) and files in `tmp/` can't be read.
 
@@ -504,8 +510,8 @@ Example: `find  .   ^$`
 
 THIS IS A DEBUG OPTION .
 
-Load direct Perl Storable dump of configuration hash from FILE, always
-relative to the suffix base directory.
+Load direct Perl Storable dump of configuration hash from FILE in `tmp/`
+under `directory`.
 
 This is an advanced option that should not be called from slapd.conf.
 
@@ -537,7 +543,7 @@ OVERLAY can be an overlay name (perl, exp, file, find) or "default".
 
 OPTION can be "cache", "prefix" or "if".
 
-	cache SPEC - specify cache expiry time.
+	cache N - cache the overlay's results for N operations.
 
 	Caching overlay results improves performance enormously in situations
 	where multiple entries are returned and all produce the same dynamic
@@ -545,8 +551,7 @@ OPTION can be "cache", "prefix" or "if".
 
 	In such cases, operations of complexity O(n) are reduced to O(1) level.
 
-	Syntax is the same as listed under "cacheRead", and 1 is again the
-	overall best setting.
+	As with "cacheRead", 1 is the overall best setting.
 
 	Example: cache 1
 
@@ -558,6 +563,15 @@ OPTION can be "cache", "prefix" or "if".
 	so to prefix with a directory, include "/" at the end.
 
 	Example: prefix subdir/
+
+	if [!]ATTRIBUTE REGEX - used by the "find" overlay: the search is only
+	done if a value of ATTRIBUTE in the entry matches REGEX (or with "!",
+	if none does). Otherwise the value is dropped.
+
+	Example: if objectClass ^dhcpHost$
+
+Options can also be given in a value, after the overlay name, i.e.
+`$ exp cache 1 $ ...`.
 
 ##### perl MATCH_REGEX NON_MATCH_REGEX
 
@@ -577,8 +591,8 @@ Example: `perl  .   ^$`
 
 THIS IS A DEBUG OPTION .
 
-Save direct Perl Storable dump of configuration hash to FILE, always
-relative to the suffix base directory.
+Save direct Perl Storable dump of configuration hash to FILE in `tmp/`
+under `directory`.
 
 This is an advanced option that should usually be called as the last
 line of slapd.conf configuration for a particular suffix.
@@ -621,9 +635,9 @@ This is a legitimate feature of the rewrite model, and is officially used to
 rewrite incoming DHCP search queries under ou=dhcp to appropriate places
 and with appropriate options under ou=clients.
 
-KEY can be one of base, scope, deref, size, time, filter, attrOnly. Rewriting
-one last element of a search, the list of attributes to return, is currently
-not possible, but the feature is on the way.
+KEY can be one of base, scope, deref, size, time, filter, attrOnly. The list
+of attributes to return can't be rewritten, since slapd selects the
+attributes to return itself.
 
 Examples: rewriting ou=dhcp to ou=clients
 
