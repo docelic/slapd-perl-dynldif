@@ -71,6 +71,7 @@ cacheRead          1
 enableBind         1
 expandVal          .   ^\$
 fileVal            .   ^\$
+findVal            .   ^\$
 debug              1
 
 access to attrs=userPassword
@@ -112,6 +113,9 @@ unless( $ldap) {
 
 sub code { $_[0]->code }
 
+# slapd's working directory (to check that DynLDIF doesn't change it)
+my $cwd= readlink "/proc/$pid/cwd";
+
 is( code( $ldap->bind( $ADMIN, password => $PW)), LDAP_SUCCESS, 'admin bind');
 
 subtest 'add example data' => sub {
@@ -143,6 +147,44 @@ subtest 'search' => sub {
 	$r= $ldap->search( base => "ou=nosuch,$SUFFIX", scope => 'one',
 		filter => '(objectClass=*)');
 	is( code( $r), LDAP_NO_SUCH_OBJECT, 'nonexistent base');
+};
+
+subtest 'limits' => sub {
+	SKIP: {
+		skip 'no /proc', 1 unless defined $cwd;
+		is( readlink "/proc/$pid/cwd", $cwd, "working directory unchanged after size limit");
+	}
+
+	# More entries than any default limit (written directly, which is faster)
+	my $hosts= "$dir/data/dc=com/dc=example/ou=hosts";
+	mkdir $hosts unless -d $hosts;
+	for my $i( 1.. 7000) {
+		open my $fh, '>', "$hosts/cn=h$i.ldif" or die;
+		print $fh "dn: cn=h$i,ou=hosts,$SUFFIX\nobjectClass: device\ncn: h$i\n";
+	}
+	my $r= $ldap->search( base => "ou=hosts,$SUFFIX", scope => 'one',
+		filter => '(objectClass=*)');
+	is( code( $r), LDAP_SUCCESS, 'rootdn: no limit');
+	is( $r->count, 7000, 'all entries');
+
+	my $anon= Net::LDAP->new( "127.0.0.1:$port") or die;
+	$r= $anon->search( base => "ou=hosts,$SUFFIX", scope => 'one',
+		filter => '(objectClass=*)');
+	is( code( $r), LDAP_SIZELIMIT_EXCEEDED, "others: slapd's sizelimit");
+	is( $r->count, 500);
+	unlink glob "'$hosts/cn=h*.ldif'";
+	ok( !-e "$hosts/cn=h1.ldif", 'removed');
+
+	# A search with a 'find' subsearch, and a later one with a time limit
+	my $T= "cn=t,ou=hosts,$SUFFIX";
+	is( code( $ldap->add( $T, attrs => [ objectClass => 'device', cn => 't',
+		l => '$ find $ .. 2 0 0 0 (uid=testuser) 0 uid' ])), LDAP_SUCCESS);
+	$r= $ldap->search( base => $T, scope => 'base', filter => '(objectClass=*)');
+	is( $r->entry( 0)->get_value( 'l'), 'testuser', 'find');
+	sleep 2;
+	$r= $ldap->search( base => $SUFFIX, timelimit => 1, filter => '(objectClass=*)');
+	is( code( $r), LDAP_SUCCESS, 'time limit counts from the start of the search');
+	is( code( $ldap->delete( $T)), LDAP_SUCCESS);
 };
 
 subtest 'modify' => sub {
