@@ -552,7 +552,7 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 
 ## LDAP Operations - Notes
 
-1. BIND operation is supported, but only in a trivial way. Therefore, binding using a DN under this part of DIT is not encouraged nor enabled by default unless `enable_bind 1` is present in the config file. It is expected that users should authenticate using some other suffixes or via e.g. GSSAPI, so that this `bind()` is never called or needed.
+1. BIND operation (simple bind) is supported, but not enabled by default unless `enableBind 1` is present in the config file. `userPassword` values can be in plain text or hashed with the schemes produced by `slappasswd`: `{SSHA}`, `{SHA}`, `{SMD5}`, `{MD5}`, `{CRYPT}`, `{CLEARTEXT}`, and `{SHA256}`, `{SSHA256}`, `{SHA384}`, `{SSHA384}`, `{SHA512}`, `{SSHA512}` from the `pw-sha2` module.
 
 1. Access control (`access to ...` in `slapd.conf`) applies to the attributes that slapd returns, but `slapd-perl` leaves the rest of access checking to the backend, and does not give it the identity of the client. So filters and COMPARE can't be checked against access rules. Instead, attributes listed in `protectAttrs` (by default `userPassword`) can't be tested with filters and COMPARE by any client. Other attributes hidden by access rules can still be tested. Without any access rules, slapd allows everyone to read everything, including passwords; see the example configuration in `etc/ldap/slapd.conf`.
 

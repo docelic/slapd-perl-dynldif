@@ -352,6 +352,8 @@ sub bind {
 
 	return LDAP_UNWILLING_TO_PERFORM unless $this->{enablebind};
 
+	$this->setup_state( \@_);
+
 	$this->normalize( \$dn);
 
 	p "BIND $dn"; # Print bind DN only, don't show $pw in log.
@@ -363,11 +365,56 @@ sub bind {
 
 	# See if any userPassword (can be multi-value) matches
 	# the provided password
-	if( any{ "$pw" eq "$_"} @pws) {
+	if( any{ $this->check_password( $pw, $_)} @pws) {
 		return LDAP_SUCCESS
 	}
 
 	LDAP_INVALID_CREDENTIALS
+}
+
+
+# Check password against a userPassword value. The value is either plain
+# text, or hashed with one of the schemes supported by slapd (see
+# slappasswd(8)): {SSHA}, {SHA}, {SMD5}, {MD5}, {CRYPT}, {CLEARTEXT}, and
+# {SHA256}/{SSHA256} etc. from the pw-sha2 module. Values with an unknown
+# scheme never match.
+my %DIGESTS= ( SHA=> \&sha1, SHA256=> \&sha256, SHA384=> \&sha384,
+	SHA512=> \&sha512, MD5=> \&md5);
+
+sub check_password {
+	my( $this, $pw, $stored)= @_;
+
+	return 0 unless defined $pw and defined $stored;
+
+	my( $scheme, $hash)= $stored=~ /^\{([^}]+)\}(.*)$/s
+		or return _equal( $pw, $stored);
+	$scheme= uc $scheme;
+
+	return _equal( $pw, $hash) if $scheme eq 'CLEARTEXT';
+
+	if( $scheme eq 'CRYPT') {
+		my $crypted= crypt( $pw, $hash);
+		return defined $crypted && _equal( $crypted, $hash)
+	}
+
+	my( $salted, $name)= $scheme=~ /^(S?)(SHA(?:256|384|512)?|MD5)$/ or return 0;
+	my $digest= $DIGESTS{$name};
+	my $len= length $digest->( '');
+	my $raw= decode_base64( $hash);
+
+	return 0 if length $raw< $len or ( !$salted and length $raw!= $len);
+	my( $d, $salt)= ( substr( $raw, 0, $len), substr( $raw, $len));
+
+	_equal( $digest->( $pw. $salt), $d)
+}
+
+# Constant-time string comparison
+sub _equal {
+	my( $a, $b)= @_;
+	return 0 unless length $a== length $b;
+	my $r= 0;
+	$r|= ord( substr $a, $_, 1) ^ ord( substr $b, $_, 1) for 0.. length( $a)- 1;
+	$r== 0
 }
 
 
