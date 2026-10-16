@@ -186,6 +186,25 @@ subtest 'modifySmarts and write errors' => sub {
 	no_warnings();
 };
 
+subtest 'deleting and adding back in one request' => sub {
+	my( $v, $dir)= new_dynldif();
+	my $file= data_file( $dir, $U);
+	is( $v->modify( $U, 'ADD', 'description', 'a', 'b'), LDAP_SUCCESS);
+	my $inode= ( stat $file)[1];
+
+	is( $v->modify( $U, 'DELETE', 'description', 'a', 'ADD', 'description', 'a'),
+		LDAP_SUCCESS, 'value');
+	is( $v->modify( $U, 'DELETE', 'description', undef, 'ADD', 'description', 'a', 'b'),
+		LDAP_SUCCESS, 'attribute');
+	is_deeply( [ get( $v, $U)->get_value( 'description') ], [ 'a', 'b' ]);
+	is( ( stat $file)[1], $inode, 'no change, nothing written (modifySmarts)');
+
+	is( $v->modify( $U, 'DELETE', 'description', undef, 'ADD', 'description', 'c'),
+		LDAP_SUCCESS, 'other value');
+	is_deeply( [ get( $v, $U)->get_value( 'description') ], [ 'c' ], 'old values not brought back');
+	no_warnings();
+};
+
 subtest 'copy on write from fallback' => sub {
 	my $fallback= [ 'searchFallback', '^cn=[^,]+,ou=hosts,', 'cn=default,ou=hosts,' ];
 	my $default= "dn: cn=default,ou=hosts,$SUFFIX\nobjectClass: device\ncn: default\nl: Zagreb\n";

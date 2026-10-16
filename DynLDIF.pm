@@ -38,7 +38,7 @@ use Net::LDAP::Filter   qw//;
 use Net::LDAP::FilterMatch;
 use Net::LDAP::Entry    qw//;
 use Net::LDAP::Util     qw/escape_filter_value/;
-use Storable            qw/freeze nstore retrieve/;
+use Storable            qw/nstore retrieve/;
 use Digest::SHA         qw/sha1 sha256 sha384 sha512/;
 use Digest::MD5         qw/md5/;
 use MIME::Base64        qw/decode_base64/;
@@ -1234,7 +1234,9 @@ sub modify {
 		# from $entry2 and continue (it's still possible that it won't
 		# exist even after that). No error checking is done here, as
 		# that'll be handled by the actual modification routine below.
-		if( scalar @values and !$entry->exists( $key)) {
+		# (Not for attributes of the stored entry, which may have been deleted
+		# earlier in this request)
+		if( scalar @values and !$entry->exists( $key) and !$orig->exists( $key)) {
 			# If we didn't load() yet, do it now. We don't want to open
 			# every entry twice unless there's a real need to operate
 			# on entry2.
@@ -1315,7 +1317,7 @@ sub modify {
 	# if it was loaded from a fallback.)
 	$entry->dn( $dn);
 	$orig->dn( $dn);
-	$changed= 0 if $this->{modifysmarts} and $this->dequal( $entry, $orig);
+	$changed= 0 if $this->{modifysmarts} and same_entry( $entry, $orig);
 
 	# If changed (true if we have (1) any request, or (2) modifySmarts== 1
 	# and real change has been detected.)
@@ -2930,11 +2932,17 @@ sub timestamp {
 	sprintf '%04d%02d%02d%02d%02d%02dZ', $t[5]+ 1900, $t[4]+ 1, @t[3, 2, 1, 0]
 }
 
-# Deep comparison of arbitrary structures
-sub dequal {
-  my( $this, $a_ref, $b_ref)= @_;
-  local $Storable::canonical= 1;
-  return freeze( $a_ref) eq freeze( $b_ref)
+# Whether entries have the same DN, attributes and values (in the same
+# order; the order of attributes does not matter)
+sub same_entry {
+	my( $x, $y)= @_;
+	return 0 unless $x->dn eq $y->dn;
+	my $content= sub {
+		my( $e)= @_;
+		join "\0\0", map { join "\0", $_, map { length. ':'. $_ } $e->get_value( $_)}
+			sort map { lc} $e->attributes
+	};
+	$content->( $x) eq $content->( $y)
 }
 
 # Whether file (relative to 'directory') may be read by the file overlay:
