@@ -86,6 +86,11 @@ subtest 'find' => sub {
 		'multiple values keep surrounding text');
 	is_deeply( expand( '$ find $ ou=users,.. 2 0 0 0 (uid=testuser) 0 uid'),
 		[ 'testuser' ], 'relative base');
+
+	# Time passes after a search with subsearches
+	$_-= 100 for grep { defined} @{ $v->{start}};
+	my( $ret)= search_entries( $v, $SUFFIX, time => 10);
+	is( $ret, LDAP_SUCCESS, "subsearch start times don't count in later searches");
 	no_warnings();
 };
 

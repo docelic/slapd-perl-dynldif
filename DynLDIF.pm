@@ -3546,6 +3546,7 @@ sub setup_state {
 	# If here, means we are entering a new search from slapd
 	} else {
 		$this->{level}= 0;
+		$this->{start}= []; # (Start times of earlier nested searches are stale)
 
 		# Trim cache when needed
 		# XXX this being a hash means you cant guarantee order of
