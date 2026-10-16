@@ -310,6 +310,7 @@ sub init {
 	# Without it, values are compared case-insensitively.
 	$this->{match_schema}= ( () = $this->{schema}->all_attributes) ?
 		$this->{schema} : undef;
+	$this->{rule_cache}= {}; # Matching rules of attributes (see leaf_match())
 
 	# Debconf-related init code
 	if( $this->{enableprompt}) {
@@ -869,6 +870,7 @@ sub search {
 		$this->{level}-= 1;
 		return LDAP_FILTER_ERROR
 	}
+	$filter= decode_utf8_deep( $filter); # (Once, see filter_match())
 
 	my @matches= ();
 
@@ -2327,6 +2329,8 @@ sub redact_filter {
 # Evaluates filter on an entry with three-valued logic (RFC 4511, 4.5.1.7),
 # returning 1 (TRUE), 0 (FALSE) or undef (Undefined). Entries match when
 # the result is TRUE.
+# Strings in $filter must be decoded from UTF-8 (see decode_utf8_deep()),
+# entry values are decoded as they are matched.
 # Components which slapd found undefined (passed as $UNDEFINED_ATTR, see
 # search()) are Undefined, and if $protect is true, so are components on
 # attributes listed in 'protectAttrs' (like slapd does for attributes the
@@ -2359,13 +2363,59 @@ sub filter_match {
 	return undef if defined $attr and lc $attr eq $UNDEFINED_ATTR;
 	return undef if $protect and $this->attr_in( $attr, $this->protected_attrs);
 
-	# Leaf components are matched by Net::LDAP::FilterMatch. It returns
-	# undef if no matching rule is available. Values are UTF-8, and are
-	# matched as characters (so that i.e. case-insensitive matching works
-	# for non-ASCII characters too).
-	my $r= Net::LDAP::Filter::match( decode_utf8_deep( $filter),
-		DynLDIF::CharEntry->new( $entry), $this->{match_schema});
+	# Leaf components are matched using the matching rules of
+	# Net::LDAP::FilterMatch (undef if no matching rule is available).
+	# Values are UTF-8, and are matched as characters (so that i.e.
+	# case-insensitive matching works for non-ASCII characters too).
+	my $r= $this->leaf_match( $op, $args, DynLDIF::CharEntry->new( $entry));
 	defined $r ? ( $r ? 1 : 0) : undef
+}
+
+# Matching rule types of filter operators
+our %OP2RULE= (
+	equalityMatch  => 'equality',
+	greaterOrEqual => 'ordering',
+	lessOrEqual    => 'ordering',
+	substrings     => 'substr',
+);
+
+# Matches a leaf filter component, like Net::LDAP::FilterMatch does, but
+# calling matching rules directly (it does a string eval for each, which is
+# slow when matching many entries), with matching rules from schema cached.
+sub leaf_match {
+	my( $this, $op, $args, $entry)= @_;
+
+	return $entry->exists( $args) ? 1 : 0 if $op eq 'present';
+
+	# Others (extensibleMatch) are rare
+	return Net::LDAP::Filter::match( { $op=> $args}, $entry, $this->{match_schema})
+		unless $op eq 'approxMatch' or $OP2RULE{$op};
+
+	my( $attr, $assertion);
+	if( $op eq 'substrings') {
+		$attr= $args->{type};
+		my @parts= @{ $args->{substrings}};
+		$assertion= join '.*', map { "\Q$_\E"} map { values %$_} @parts;
+		$assertion= "^$assertion" if exists $parts[0]{initial};
+		$assertion.= '$' if exists $parts[-1]{final};
+	} else {
+		( $attr, $assertion)= @$args{qw/attributeDesc assertionValue/};
+	}
+
+	my $schema= $this->{match_schema};
+	my $rule= 'cis_'. $op;
+	if( $schema and $op ne 'approxMatch') {
+		my $cache= $this->{rule_cache}{ lc $attr}||= {};
+		$cache->{$op}= $schema->matchingrule_for_attribute( $attr, $OP2RULE{$op})
+			unless exists $cache->{$op};
+		$rule= $cache->{$op};
+		return undef unless defined $rule;
+	}
+
+	# (Net::LDAP::FilterMatch defines them in package Net::LDAP::Filter)
+	my $match= Net::LDAP::Filter->can( "_$rule") or return undef;
+	my $r= eval { $match->( $assertion, $op, $entry->get_value( $attr)) };
+	$r
 }
 
 # Copy of a data structure, with strings that are valid UTF-8 decoded
@@ -3527,7 +3577,7 @@ sub compare {
 		"($attr=". escape_filter_value( $value). ')');
 	return LDAP_OTHER unless $filter;
 
-	$this->filter_match( $filter, $entry) ?
+	$this->filter_match( decode_utf8_deep( $filter), $entry) ?
 		LDAP_COMPARE_TRUE : LDAP_COMPARE_FALSE
 }
 

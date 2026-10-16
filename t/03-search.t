@@ -126,6 +126,15 @@ subtest 'filters from slapd' => sub {
 
 	( $ret, $dns)= search_dns( $v, $SUFFIX, filter => '(cn~=test user)');
 	is_deeply( $dns, [ $U ], 'approximate match');
+
+	( $ret, $dns)= search_dns( $v, $SUFFIX, filter => '(cn:caseExactMatch:=Test User)');
+	is_deeply( $dns, [ $U ], 'extensible match');
+	( $ret, $dns)= search_dns( $v, $SUFFIX, filter => '(ou:dn:=groups)');
+	is_deeply( $dns, [ sort "ou=groups,$SUFFIX", $G ], 'extensible match on DN attributes');
+	( $ret, $dns)= search_dns( $v, $SUFFIX, filter => '(&(cn=test*)(cn=*user)(cn=*st u*))');
+	is_deeply( $dns, [ $U ], 'substrings');
+	( $ret, $dns)= search_dns( $v, $SUFFIX, filter => '(&(uidNumber>=12000)(uidNumber<=12000))');
+	is_deeply( $dns, [ $U ], 'ordering');
 	no_warnings();
 };
 
