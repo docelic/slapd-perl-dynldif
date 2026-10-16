@@ -1,7 +1,10 @@
 # Add this to /etc/default/slapd only if you receive an error about
-# slapd being unable to start the Perl backend due to missing libperl:
+# slapd being unable to start the Perl backend due to missing libperl
+# symbols. It preloads the libperl that slapd's back_perl module is linked
+# with (adjust BACK_PERL if slapd modules are installed elsewhere):
 
-export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libperl.so.5.24
-
-# NOTE: Find the exact pathname which needs to be added with command:
-# find /usr/lib/ -name 'libperl.*'
+BACK_PERL=${BACK_PERL:-/usr/lib/ldap/back_perl.so}
+LIBPERL=$(ldd "$BACK_PERL" 2>/dev/null | awk '$1 ~ /^libperl\./ { print $3 }')
+if [ -n "$LIBPERL" ]; then
+	export LD_PRELOAD="$LIBPERL"
+fi
