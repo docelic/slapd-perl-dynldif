@@ -84,6 +84,18 @@ subtest 'modrdn' => sub {
 	ok( get( $v, "cn=moved,ou=hosts,$SUFFIX"), 'source kept after failure');
 	is( $v->modrdn( "cn=moved,ou=hosts,$SUFFIX", 'cn=moved', 1),
 		LDAP_SUCCESS, 'rename to same DN is a no-op');
+	is( $v->modrdn( "cn=moved,ou=hosts,$SUFFIX", 'cn=Moved', 1), LDAP_SUCCESS,
+		'rename changing only the case of the value');
+	is_deeply( [ get( $v, "cn=moved,ou=hosts,$SUFFIX")->get_value( 'cn') ], [ 'Renamed Group', 'Moved' ],
+		'value updated');
+	is( $v->modrdn( "ou=hosts,$SUFFIX", 'OU=Hosts', 1), LDAP_SUCCESS,
+		'same for a non-leaf entry');
+	is_deeply( [ get( $v, "ou=hosts,$SUFFIX")->get_value( 'ou') ], [ 'Hosts' ]);
+	ok( get( $v, "cn=moved,ou=hosts,$SUFFIX"), 'children kept');
+
+	is( $v->modrdn( "cn=moved,ou=hosts,$SUFFIX", 'cn=x', 1, "cn=moved,ou=hosts,$SUFFIX"),
+		LDAP_UNWILLING_TO_PERFORM, 'move under itself refused');
+	ok( get( $v, "cn=moved,ou=hosts,$SUFFIX"), 'entry kept');
 	no_warnings();
 };
 

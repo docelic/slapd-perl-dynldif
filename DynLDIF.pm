@@ -3691,7 +3691,12 @@ sub modrdn {
 
 	DEBUG and p "MODRDN '$dn' -> '$newdn'";
 
-	return LDAP_SUCCESS if $newdn eq $dn;
+	# Can't be moved under itself
+	return LDAP_UNWILLING_TO_PERFORM
+		if defined $parent and ( $parent eq $dn or $parent=~ /,\Q$dn\E\z/);
+
+	# Same DN, i.e. with RDN value in other case: only values are updated
+	my $same= $newdn eq $dn;
 
 	my( $ret, %ret, %new);
 
@@ -3703,16 +3708,18 @@ sub modrdn {
 	return $ret unless $ret== LDAP_SUCCESS;
 	my $directory= $ret{directory};
 
-	if( defined $directory) {
+	if( defined $directory and !$same) {
 		opendir my $dh, $directory or return LDAP_OPERATIONS_ERROR;
 		my @children= grep { !/^\.\.?$/} readdir $dh;
 		closedir $dh;
 		return LDAP_NOT_ALLOWED_ON_NONLEAF if @children;
 	}
 
-	$ret= $this->dn2leaf( $newdn, \%new, qw/leaf 0 namesonly 1 verify 1/);
-	return $ret unless $ret== LDAP_SUCCESS;
-	return LDAP_ALREADY_EXISTS if defined $new{file};
+	unless( $same) {
+		$ret= $this->dn2leaf( $newdn, \%new, qw/leaf 0 namesonly 1 verify 1/);
+		return $ret unless $ret== LDAP_SUCCESS;
+		return LDAP_ALREADY_EXISTS if defined $new{file};
+	}
 
 	# Update RDN attribute values
 	if( $delFlag) {
@@ -3732,8 +3739,9 @@ sub modrdn {
 
 	$entry->dn( $newdn);
 
-	$ret= $this->save( $newdn, $entry, qw/overwrite 0/);
+	$ret= $this->save( $newdn, $entry, overwrite => $same);
 	return $ret unless $ret== LDAP_SUCCESS;
+	return LDAP_SUCCESS if $same;
 
 	unlink $file or return LDAP_OPERATIONS_ERROR;
 	rmdir $directory if defined $directory;
