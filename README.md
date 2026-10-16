@@ -258,8 +258,14 @@ access rules (`access to ...` in `slapd.conf`) can't be applied to filters
 and COMPARE (see "LDAP Operations - Notes"). Filter components on these
 attributes therefore evaluate to Undefined, as slapd does for attributes
 the client has no access to, and COMPARE returns `insufficientAccess` (50),
-for all clients. Filters in the configuration (i.e. of the `find` overlay)
-are not affected, and BIND works as usual.
+for all clients. The same applies to filters of the `find` overlay. BIND
+works as usual.
+
+Overlays don't expose these attributes either: `exp` and `find` drop values
+that would come from them, and `file` doesn't read entry files (which contain
+all attributes) or files in `tmp/`. This matters when clients can write
+values of attributes that overlays run on, since they could otherwise copy
+other entries' data into their own.
 
 Their values are also hidden in debug output.
 
@@ -457,6 +463,8 @@ overlay "file" run on its attributes.
 
 The "file" overlay enables expansion into values of on-disk files, always
 relative to the suffix base directory.
+
+Entry files (with the `extension`) and files in `tmp/` can't be read.
 
 Example: `file  .   ^$`
 

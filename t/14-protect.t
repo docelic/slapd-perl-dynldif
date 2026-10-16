@@ -79,13 +79,17 @@ subtest 'other attributes' => sub {
 	no_warnings();
 };
 
-subtest 'internal searches are not restricted' => sub {
-	# Searches from overlays come from the configuration, not from clients
+subtest 'internal searches are restricted too' => sub {
+	# Specifications of the find overlay are in entries, which clients may
+	# be able to write
 	my( $v)= new_dynldif([[ 'findVal', '.', '^$' ]]);
 	add_ok( $v, "dn: cn=t,ou=hosts,$SUFFIX\nobjectClass: device\ncn: t\n".
-		"l: \$ find \$ $SUFFIX 2 0 0 0 (userPassword=test) 0 uid\n");
+		"l: \$ find \$ $SUFFIX 2 0 0 0 (userPassword=test) 0 uid\n".
+		"l: \$ find \$ $SUFFIX 2 0 0 0 (!(userPassword=x)) 0 uid\n".
+		"l: \$ find \$ $SUFFIX 2 0 0 0 (uid=testuser) 0 uid\n");
 	my( $ret, @e)= search_entries( $v, "cn=t,ou=hosts,$SUFFIX", scope => 0);
-	is( $e[0]->get_value( 'l'), 'testuser', 'find overlay filter');
+	is_deeply( [ $e[0]->get_value( 'l') ], [ 'testuser' ],
+		'filters on protected attributes match nothing');
 	no_warnings();
 };
 
@@ -118,6 +122,33 @@ subtest 'values hidden in debug output' => sub {
 	is( $v->modify( $U, 'REPLACE', 'userPassword', 'secretpw8'), LDAP_SUCCESS);
 	unlike( read_log( $dir), qr/secret/, 'userPassword always hidden');
 	$v->config( 'debug', 'none');
+	no_warnings();
+};
+
+subtest 'overlays do not expose protected data' => sub {
+	my( $v, $dir)= new_dynldif([ [ 'expandVal', '.', '^$' ], [ 'fileVal', '.', '^$' ],
+		[ 'findVal', '.', '^$' ], [ 'saveDump', 'x.dump' ] ]);
+	open my $fh, '>', "$dir/note.txt" or die;
+	print $fh "note\n";
+	close $fh;
+	my $E= "cn=e,ou=hosts,$SUFFIX";
+	my @specs= (
+		[ "\$ exp \$ $U userPassword", qr/^ExpandVal: 'userPassword' is in protectAttrs$/ ],
+		[ '$ exp $ uid=testuser,ou=users,.. USERPASSWORD 0', qr/^ExpandVal: 'USERPASSWORD' is in protectAttrs$/ ],
+		[ '$ find $ .. 2 0 0 0 (uid=testuser) 0 userPassword', qr/^FindVal: 'userPassword' is in protectAttrs$/ ],
+		[ '$ file $ dc=com/dc=example/ou=users/uid=testuser.ldif', qr{^FileVal: reading 'dc=com/dc=example/ou=users/uid=testuser.ldif' is not allowed$} ],
+		[ '$ file $ ./dc=com/dc=example/ou=users/uid=testuser.ldif 1', qr{'\./dc=com.* is not allowed} ],
+		[ '$ file $ tmp/x.dump', qr{'tmp/x.dump' is not allowed} ],
+		[ '$ file $ /tmp//x.dump', qr{'/tmp//x.dump' is not allowed} ],
+	);
+	# (Filters of 'find' can't test protected attributes either)
+	my $find= '$ find $ .. 2 0 0 0 (&(uid=testuser)(userPassword=test)) 0 uid';
+	add_ok( $v, "dn: $E\nobjectClass: device\ncn: e\n".
+		join( '', map { "description: $_->[0]\n"} @specs). "description: $find\nl: \$ file \$ note.txt\nl: \$ exp \$ $U uid\n");
+	my( $ret, @e)= search_entries( $v, $E, scope => 0);
+	is_deeply( [ $e[0]->get_value( 'description') ], [], 'values dropped');
+	is_deeply( [ sort $e[0]->get_value( 'l') ], [ 'note', 'testuser' ], 'others expanded');
+	warnings_like( $_->[1]) for @specs;
 	no_warnings();
 };
 

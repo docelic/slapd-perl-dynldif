@@ -1026,7 +1026,7 @@ sub search {
 
 		# We unshift because on return from Perl to ldap, data is read
 		# in reverse order.
-		if( $this->filter_match( $filter, $entry, $as_ldif)) {
+		if( $this->filter_match( $filter, $entry, 1)) {
 			DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
 			unshift @matches, $as_ldif? $this->e2ldif( $entry->dn, $entry): $entry;
 		}
@@ -1074,7 +1074,7 @@ sub search {
 							$_[2], qw/dnasfile 1 entry 1/);
 
 						return 0 unless $ret== LDAP_SUCCESS;
-						if( $this->filter_match( $filter, $entry, $as_ldif)) {
+						if( $this->filter_match( $filter, $entry, 1)) {
 							# Size limit is exceeded only when there's a match beyond it
 							if( @matches>= $req{size}) {
 								$limit= LDAP_SIZELIMIT_EXCEEDED;
@@ -1631,6 +1631,14 @@ sub run_overlays {
 											goto FILE_DONE
 										}
 
+										# Entry files and files in tmp/ (config dumps) are not
+										# readable, since they contain all data
+										unless( $this->readable_file( $file)) {
+											warn "FileVal: reading '$file' is not allowed\n";
+											$comp= undef; # Drops the value
+											goto FILE_DONE
+										}
+
 										po 'FILE: will read dir='.  $this->{directory}.
 											', file='. $file.
 											', spec='. ( $spec|| '');
@@ -1733,6 +1741,12 @@ sub run_overlays {
 												$comp= undef; # Drops the value
 												goto EXP_END
 											}
+										}
+
+										if( $this->attr_in( $attr, $this->protected_attrs)) {
+											warn "ExpandVal: '$attr' is in protectAttrs\n";
+											$comp= undef; # Drops the value
+											goto EXP_END
 										}
 
 										my @vals= $ent->get_value( $attr);
@@ -1846,6 +1860,12 @@ sub run_overlays {
 											$gval_joiner= $gvalx;
 											$gval_joiner=~ s/\\x([0-9a-fA-F]{2})/chr hex $1/ge;
 											$gvalx= undef;
+										}
+
+										if( $this->attr_in( $f[7], $this->protected_attrs)) {
+											warn "FindVal: '$f[7]' is in protectAttrs\n";
+											$comp= undef; # Drops the value
+											goto FIND_DONE
 										}
 
 										# NOTE: MUST use {} as last arg to indicate subsearch.
@@ -2820,6 +2840,18 @@ sub dequal {
   my( $this, $a_ref, $b_ref)= @_;
   local $Storable::canonical= 1;
   return freeze( $a_ref) eq freeze( $b_ref)
+}
+
+# Whether file (relative to 'directory') may be read by the file overlay:
+# not entry files, their temporary files, or files in tmp/
+sub readable_file {
+	my( $this, $file)= @_;
+	# (As in read_file())
+	$file=~ s{^[\./]+}{};
+	$file=~ s{\.\.+}{\.}g;
+	my $ext= quotemeta $this->{extension};
+	return 0 if $file=~ m{^tmp(?:/|$)} or $file=~ /$ext(?:\.tmp\d+)?$/;
+	1
 }
 
 # Function able to read a file and return it all, or according to $spec
