@@ -18,7 +18,8 @@ done through other, non-Perl-based suffixes.
 apt install slapd libfile-find-rule-perl libnet-ldap-perl libtext-csv-xs-perl liblist-moreutils-perl
 ```
 
-2. Obtain and run DynLDIF with an example config file that provides suffix `dc=example,dc=com`:
+2. Obtain and run DynLDIF with an example config file that provides suffix `dc=example,dc=com`
+(as root; stop the system's slapd first if it is running, i.e. with `systemctl stop slapd`):
 
 ```sh
 cd /etc/ldap
@@ -124,8 +125,11 @@ SPEC can be:
 N    - Number/count of LDAP operations
 ```
 
-Overall best value, which minimizes risk of serving stale data while reaching
-noticeable optimization improvement (up to 25%), is 1 operation, specified as `1`.
+Cached entries are cleared on every write. Since entry files are usually in the
+operating system's cache, `cacheRead` only helps when the same entries are read
+many times within an operation (i.e. by overlays); otherwise it can be slower
+than reading the files. If used, the best value, which minimizes the risk of
+serving stale data, is 1 operation, specified as `1`.
 
 `cacheRead` and `overlayConfig` cache can be used together, amplifying the effect.
 
@@ -639,9 +643,9 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 
 1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`.
 
-1. ADD requires the entry to have an `objectClass` and to contain its RDN value. Other schema checks are not done.
+1. ADD requires the entry to have an `objectClass`, to contain its RDN value, and values of each attribute to be distinct. Other schema checks are not done.
 
-1. MODIFY returns the standard result codes when adding a value that exists, deleting a value or attribute that does not exist, or removing the RDN value. Values are compared using the matching rules from the schema when `schemaLDIF` is configured, and case-insensitively otherwise. The same applies to search filters and COMPARE.
+1. MODIFY returns the standard result codes when adding a value that exists or the same value twice, deleting a value or attribute that does not exist, or removing the RDN value or `objectClass`. Values are compared using the matching rules from the schema when `schemaLDIF` is configured, and case-insensitively otherwise. The same applies to search filters and COMPARE.
 
 1. MODIFY receives modifications from `slapd-perl` as a flat list, without value counts, so a value equal to `ADD`, `DELETE` or `REPLACE` is ambiguous. DynLDIF resolves this using what slapd guarantees about the list, and by checking attribute names against the schema when `schemaLDIF` is configured. Without the schema, a list in which a value equal to an action name is followed by a valid attribute name and further values is read as two modifications. (Resolving this fully would need `slapd-perl` to pass the number of values, which is a change to OpenLDAP.)
 
