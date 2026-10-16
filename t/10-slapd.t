@@ -411,6 +411,37 @@ subtest 'hasSubordinates' => sub {
 	is( $r->entry( 0)->get_value( 'hasSubordinates'), 'FALSE', 'leaf, with +');
 };
 
+subtest 'concurrent clients' => sub {
+	my( $clients, $n)= ( 4, 10);
+	my @pids;
+	for my $c( 1.. $clients) {
+		my $pid= fork;
+		die "Can't fork: $!" unless defined $pid;
+		if( !$pid) {
+			my $l= Net::LDAP->new( "127.0.0.1:$port") or POSIX::_exit( 1);
+			$l->bind( $ADMIN, password => $PW);
+			my $errors= 0;
+			for my $i( 1.. $n) {
+				my $dn= "cn=c$c-$i,ou=hosts,$SUFFIX";
+				$errors++ if $l->add( $dn, attrs => [ objectClass => 'device', cn => "c$c-$i" ])->code;
+				$errors++ if $l->modify( $dn, replace => { description => $i })->code;
+				$errors++ if $l->search( base => "ou=hosts,$SUFFIX", filter => "(cn=c$c-*)")->code;
+				$errors++ if $l->moddn( $dn, newrdn => "cn=r$c-$i", deleteoldrdn => 1)->code;
+				$errors++ if $l->delete( "cn=r$c-$i,ou=hosts,$SUFFIX")->code;
+			}
+			POSIX::_exit( $errors ? 1 : 0);
+		}
+		push @pids, $pid;
+	}
+	for( @pids) {
+		waitpid $_, 0;
+		is( $?, 0, 'client without errors');
+	}
+	my $r= $ldap->search( base => "ou=hosts,$SUFFIX", filter => '(|(cn=c*)(cn=r*))');
+	is( $r->count, 0, 'all entries deleted');
+	ok( !glob( "'$dir/data/dc=com/dc=example/ou=hosts/*.tmp*'"), 'no temporary files left');
+};
+
 subtest 'bad values are not fatal' => sub {
 	open my $fh, '>', "$dir/data/f.txt" or die;
 	print $fh "x\n";
