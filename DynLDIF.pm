@@ -51,26 +51,20 @@ use Scalar::Util        qw/reftype/;
 
 use subs                qw/p pd pc pcd po pod/;
 
-# To make use of DEBUG, server should best run in foreground mode. Something like:
-# sudo -u openldap /usr/sbin/slapd -d 0
-use constant DEBUG    => 1; # General debug?
-use constant DEBUG_DTL=> 0; # Detailed debug?
-use constant DEBUG_OVL=> 1; # Overlays debug?
-use constant DEBUG_CCH=> 0; # Cache debug?
-
-use constant CFG_STACK=> 1; # Allow save/reset/load config file routines
-use constant CFG_DUMP => 1; # Allow savedump/loaddump config file routines
-
-# Enable/disable options
-use constant APPENDER => 1; # Enable appending with other entries' attributes.
-use constant FILEVAL  => 1; # Enable value expansion by reading files.
-use constant EXPANDVAL=> 1; # Enable value expansion by loading DN attrs.
-use constant FINDVAL  => 1; # Enable re-searching and returning certain attr.
-use constant PERLEVAL => 0; # Enable Perl evaluation of values.
-
-use constant RELOCATOR=> 0; # Enable relocation of Debconf keys from client.
-use constant PROMPTER => 0; # Enable relocation of Debconf keys from server.
-use constant CACHE    => 1; # Enable honoring cache parms for overlay values?
+# Debug output goes to STDERR (slapd's log; run slapd in foreground to see
+# it, i.e. sudo -u openldap /usr/sbin/slapd -d 0). It is enabled with the
+# 'debug' config directive. Being process-wide, it applies to all databases
+# using this backend.
+our %DEBUG= (
+	general => 0, # General debug
+	detail  => 0, # Detailed debug
+	overlay => 0, # Overlays debug
+	cache   => 0, # Cache debug
+);
+sub DEBUG()     { $DEBUG{general} }
+sub DEBUG_DTL() { $DEBUG{detail} }
+sub DEBUG_OVL() { $DEBUG{overlay} }
+sub DEBUG_CCH() { $DEBUG{cache} }
 
 # Search scope defines
 use constant BASE     => 0;
@@ -96,21 +90,6 @@ our %DEREF2NAME = (
 	3 => "find",
 );
 
-BEGIN {
-	# No need to initialize the whole Debconf block if prompter is off.
-	# (This allows server to run on non-debian machine as long as you do
-	# not require server-side/debconf prompting).
-	return if !PROMPTER;
-
-	$ENV{DEBCONF_SYSTEMRC}= '/etc/debconf.conf.pipe';
-	require 'Debconf/Db.pm';
-	require 'Debconf/Config.pm';
-	require 'Debconf/AutoSelect.pm';
-	require 'Debconf/Format/822.pm';
-	require 'Debconf/DbDriver/LDAP.pm';
-	Debconf::DbDriver::LDAP->import( qw/parse_records/);
-}
-
 # Raw/binary value regex
 our $RAW              = qr/(?i:^jpegPhoto|;binary)/;
 
@@ -121,17 +100,13 @@ our %S2L= (
 	3 => undef, # CHILDREN (unlimited)
 );
 
-# Overlays that will run on an entry if individual
-# overlay is enabled. Name here should match the name of overlay's
-# config array (see sub new()'s $this object) and in turn it is also
-# name by which overlay will be recognized by run_overlays() within
-# attribute's values.
-our @OVERLAYS= ( grep{ defined} (
-	FILEVAL    ? 'file'   : undef,
-	EXPANDVAL  ? 'exp'    : undef,
-	FINDVAL    ? 'find'   : undef,
-	PERLEVAL   ? 'perl'   : undef,
-));
+# Overlays, in order of execution. Each runs on an entry if enabled
+# ('enableFile', 'enableExp', 'enableFind', 'enablePerl'). Name here should
+# match the name of overlay's config array (see sub new()'s $this object)
+# and in turn it is also name by which overlay will be recognized by
+# run_overlays() within attribute's values.
+our @OVERLAYS= qw/file exp find perl/;
+
 
 # Necessary variables for Debconf interaction and server-side prompting.
 #  cin/cout, tin/tout: config DB in/out pipe, templates DB in/out pipe, used
@@ -201,6 +176,20 @@ sub new {
 		                           #  missing by default so that you can run server,
 		                           #  get schema, save it and have it on next start)
 		enablebind     => 0,       # Allow bind? Our implementation is minimal.
+
+		# Features
+		enableappend   => 1,       # Append entries with other entries' attrs
+		enablefile     => 1,       # Value expansion by reading files
+		enableexp      => 1,       # Value expansion by loading DN attrs
+		enablefind     => 1,       # Re-searching and returning certain attrs
+		enableperl     => 0,       # Perl evaluation of values (dangerous)
+		enablecache    => 1,       # Honor cache options for overlay values
+		enablerelocate => 0,       # Relocation of Debconf keys from client
+		enableprompt   => 0,       # Server-side Debconf prompter
+		enablestack    => 1,       # save/reset/load/clean config directives
+		enabledump     => 1,       # savedump/loaddump config directives
+
+		debug          => q{},     # Debug output (sets global %DEBUG)
 
 		# Keys that control parsing behavior in slapd.conf and basically take
 		# effect directly when encountered.
@@ -312,7 +301,10 @@ sub init {
 	$this->{schema}||= new Net::LDAP::Schema;
 
 	# Debconf-related init code
-	$this->debconf_initialize if PROMPTER;
+	if( $this->{enableprompt}) {
+		my $ret= $this->debconf_initialize;
+		return $ret unless $ret== LDAP_SUCCESS;
+	}
 
 	# Initialize Text::CSV_XS parser suitable for generic use
 	$this->{standard_parse}= Text::CSV_XS->new({
@@ -432,6 +424,24 @@ sub config {
 		if( $key eq 'message') {                    # MESSAGE
 			warn 'Message: ', join( ' ', @val), "\n"
 
+		} elsif( $key eq 'debug') {                 # DEBUG OUTPUT
+			# debug [general] [detail] [overlay] [cache] | all | 1 | none | 0
+			my %set= map { $_=> 0} keys %DEBUG;
+			for my $word( map { lc} @val) {
+				if( $word eq 'all') {
+					$set{$_}= 1 for keys %set
+				} elsif( $word eq '1') {
+					@set{qw/general overlay/}= ( 1, 1)
+				} elsif( exists $set{$word}) {
+					$set{$word}= 1
+				} elsif( $word ne 'none' and $word ne '0') {
+					warn "Invalid 'debug' value '$word'; expected one or more of ".
+						join( ', ', sort( keys %set), qw/all 1 none 0/). "\n";
+					return LDAP_PARAM_ERROR
+				}
+			}
+			%DEBUG= %set;
+
 		} elsif( $key eq 'entryappend' or $key eq 'searchsubst') { # RULES
 			# Rules are in form "ATTR PATTERN ... -> ...". Without a valid
 			# '->' marker, rule processing would loop forever.
@@ -464,10 +474,10 @@ sub config {
 		} elsif( $key eq 'cacheread') {             # DISKREAD CACHE
 			$this->parse_cache_opt( 'read', $val[0])
 
-		} elsif( $key eq 'reset' and CFG_STACK) {   # RESET STACK
+		} elsif( $key eq 'reset' and $this->{enablestack}) {   # RESET STACK
 			$this->{stack}= undef
 
-		} elsif( $key eq 'save' and CFG_STACK) {    # SAVE STACK
+		} elsif( $key eq 'save' and $this->{enablestack}) {    # SAVE STACK
 			for( @val) {
 				s/[^\w\.]//g; # allow only [\w\.]+ in filename
 				s/^\.//; # delete all '.' prefix on the filename
@@ -479,7 +489,7 @@ sub config {
 				return $ret unless $ret== LDAP_SUCCESS;
 			}
 
-		} elsif( $key eq 'load' and CFG_STACK) {    # LOAD STACK
+		} elsif( $key eq 'load' and $this->{enablestack}) {    # LOAD STACK
 
 			# In load specification, the first argument is the filename. The rest,
 			# if present, is a list of PATTERN REPLACEMENT to perform
@@ -536,7 +546,7 @@ sub config {
 				warn "Empty stack file '$_'. Configuration mistake?\n"
 			}
 
-		} elsif( $key eq 'clean' and CFG_STACK) {   # DELETE OLD STACK FILES
+		} elsif( $key eq 'clean' and $this->{enablestack}) {   # DELETE OLD STACK FILES
 
 			unless( $this->{tmpdir}) {
 				warn "Called 'clean' before 'directory' has been set\n";
@@ -552,14 +562,14 @@ sub config {
 				}
 			}
 
-		} elsif( $key eq 'savedump' and CFG_DUMP) { # SAVE DUMP
+		} elsif( $key eq 'savedump' and $this->{enabledump}) { # SAVE DUMP
 			for( $val[0]) {
 				if( not my $ret= nstore $this, $this->{tmpdir}. '/'. $_) {
 					return $ret unless $ret== LDAP_SUCCESS;
 				}
 			}
 
-		} elsif( $key eq 'loaddump' and CFG_DUMP) { # LOAD DUMP
+		} elsif( $key eq 'loaddump' and $this->{enabledump}) { # LOAD DUMP
 			my $ret;
 
 			for( $val[0]) {
@@ -643,7 +653,7 @@ sub add {
 	# See if there's work for relocator.
 	#
 
-	if( RELOCATOR) {
+	if( $this->{enablerelocate}) {
 		$ret= $this->check_relocation( $entry);
 		return $ret unless $ret== LDAP_SUCCESS;
 	}
@@ -652,7 +662,7 @@ sub add {
 	# See if there's work for server-side prompter.
 	#
 
-	if( PROMPTER) {
+	if( $this->{enableprompt}) {
 		$ret= $this->check_prompter( $entry);
 		return $ret unless $ret== LDAP_SUCCESS;
 	}
@@ -724,7 +734,7 @@ sub search {
 				push @stack, [ $1, $2, $3, $4, $5, $6, $7, $8, $9];
 
 			} else {
-				pd "SEARCH SUBST #$id skipped ($k!~ /$v/)";
+				DEBUG_DTL and pd "SEARCH SUBST #$id skipped ($k!~ /$v/)";
 				$ok= 0;
 			}
 
@@ -1144,7 +1154,7 @@ sub run_overlays {
 
 	for my $a( @candidates) {
 
-		for my $ovl( @OVERLAYS) {
+		for my $ovl( grep { $this->{"enable$_"}} @OVERLAYS) {
 			pod "Running OVERLAY $ovl on '$a'";
 
 			my @v= $e->get_value( $a);
@@ -1719,7 +1729,7 @@ sub load {
 	my $ldif= q{};
 
 	# If open as entry, and dynamic functions are enabled, do the whole thing.
-	$this->run_appender( $entry) if APPENDER;
+	$this->run_appender( $entry) if $this->{enableappend};
 	$this->run_overlays( $entry, $opts{origdn}); # origdn can be empty
 
 	# If we opened as entry but need to return as ldif, convert.
@@ -2936,7 +2946,7 @@ sub ovl_options {
 		# seconds or number of uses. Make sure time spec is converted to
 		# seconds, and that the queue to place the key in is properly
 		# named, and that it exists (create if not).
-		if( CACHE and $opt eq 'cache') {
+		if( $opt eq 'cache' and $this->{enablecache}) {
 			my $spec= shift @opts;
 			
 			$this->parse_cache_opt( $ovl, $spec);
@@ -2952,7 +2962,7 @@ sub ovl_options {
 
 			# Push could be done outside of per-option block, but the way we do it
 			# here, we can achieve the option to be ignored if the top if() doesn't
-			# match (if say, caching is disabled with CACHE => 0 constant).
+			# match (if say, caching is disabled with enableCache 0).
 			# XXX Note that we push original $spec here, not the processed one,
 			# even if we did process it to extract expiry time etc. It's left
 			# to see what is more useful.
@@ -3049,6 +3059,25 @@ sub setup_state {
 # the program does not work for the most part anyway ;-)
 sub debconf_initialize {
 	my( $this)= @_;
+
+	# Loaded only when the prompter is enabled, so that the server can run on
+	# machines without Debconf.
+	$ENV{DEBCONF_SYSTEMRC}= '/etc/debconf.conf.pipe';
+	unless( -r $ENV{DEBCONF_SYSTEMRC}) {
+		warn "enablePrompt: can't read '$ENV{DEBCONF_SYSTEMRC}'\n";
+		return LDAP_OTHER
+	}
+	unless( eval {
+		require Debconf::Db;
+		require Debconf::Config;
+		require Debconf::AutoSelect;
+		require Debconf::Format::822;
+		require Debconf::DbDriver::LDAP;
+		1
+	}) {
+		warn "enablePrompt: can't load Debconf modules ($@)";
+		return LDAP_OTHER
+	}
 
 	# Set up minimal valid debconf state (in the end, it'll contain
 	# the fixed contents below + the template/config of the question

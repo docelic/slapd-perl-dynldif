@@ -127,6 +127,22 @@ noticeable optimization improvement (up to 25%), is 1 operation, specified as `1
 
 Invoke removal of all saved stack files from disk.
 
+##### debug CATEGORY ...
+
+Enable debug output, which goes to slapd's standard error (run slapd in
+foreground, i.e. with `-d 0`, to see it). CATEGORY can be `general`,
+`detail`, `overlay` or `cache`, or `all`, `1` (same as `general overlay`),
+`none` or `0`. Each `debug` line replaces the previous setting. By default,
+debug output is disabled.
+
+Debug output is process-wide, i.e. it applies to all databases using this
+backend.
+
+Values of `userPassword` and of attributes listed in `protectAttrs` are
+shown as `*****`.
+
+Example: `debug general overlay`
+
 ##### deleteTrees 0|1
 
 Specify whether DynLDIF should allow deleting non-leaf elements (deleting
@@ -140,6 +156,25 @@ Whether to allow binding as entries under this suffix. By default this
 is disabled.
 
 See notes for BIND under "LDAP Operations - Notes".
+
+##### enableAppend, enableCache, enableDump, enableExp, enableFile, enableFind, enablePerl, enablePrompt, enableRelocate, enableStack 0|1
+
+Enable or disable individual features:
+
+| Directive | Default | Feature |
+|---|---|---|
+| `enableAppend` | 1 | `entryAppend` rules |
+| `enableExp` | 1 | `exp` overlay |
+| `enableFile` | 1 | `file` overlay |
+| `enableFind` | 1 | `find` overlay |
+| `enablePerl` | 0 | `perl` overlay. It evaluates Perl code from attribute values, so enable it only if all writers to the tree are trusted |
+| `enableCache` | 1 | `cache` option of overlays |
+| `enableRelocate` | 0 | Relocation of entries, see `addRelocate` |
+| `enablePrompt` | 0 | Server-side Debconf prompter, see `addPrompt` |
+| `enableStack` | 1 | `save`, `load`, `reset` and `clean` directives (these must come after it) |
+| `enableDump` | 1 | `saveDump` and `loadDump` directives (these must come after it) |
+
+Example: `enablePerl 1`
 
 ##### extension .ldif
 
@@ -408,8 +443,7 @@ Specify regexes that each entry DN must and must not match respectively, to have
 overlay "perl" run on its attributes.
 
 By default, Perl overlay is disabled as it is in fact an interface for
-"eval", and is considered dangerous. To activate it, open DynLDIF.pm and
-enable constant PERLEVAL.
+"eval", and is considered dangerous. To activate it, add `enablePerl 1`.
 
 Example: `perl  .   ^$`
 
