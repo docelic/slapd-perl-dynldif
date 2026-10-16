@@ -168,6 +168,53 @@ subtest 'matching rules from schema' => sub {
 	no_warnings();
 };
 
+subtest 'attribute options' => sub {
+	for my $schema( 0, 1) {
+		my( $v2)= new_dynldif( $schema ? [[ 'schemaLDIF', "$DATA_DIR/schema.ldif" ]] : []);
+		my $X= "cn=x,ou=hosts,$SUFFIX";
+		add_ok( $v2, "dn: $X\nobjectClass: device\ncn: x\ncn;lang-en: Y\ndescription;lang-de: d\n");
+		my $with= $schema ? 'with schema' : 'without schema';
+		for( [ '(cn;lang-en=y)', [ $X ], 'attribute with option' ],
+			[ '(cn=y)', [ $X ], 'subtype values match the attribute' ],
+			[ '(cn;lang-de=y)', [], 'other option' ],
+			[ '(cn;lang-en=x)', [], 'value without the option' ],
+			[ '(description=*)', [ $X ], 'presence of a subtype' ],
+			[ '(description;lang-de=*)', [ $X ], 'presence with option' ],
+			[ '(cn;lang-en=*Y*)', [ $X ], 'substring' ],
+		) {
+			my( $f, $expect, $name)= @$_;
+			my( $ret, $dns)= search_dns( $v2, $SUFFIX, filter => $f);
+			is_deeply( $dns, $expect, "$name $f, $with");
+		}
+		is( $v2->compare( $X, 'cn;lang-en=y'), 6, "compare, $with");
+		is( $v2->compare( $X, 'cn=y'), 6, "compare subtype, $with");
+		is( $v2->modify( $X, 'ADD', 'cn;lang-en', 'a', 'A'), 20, "duplicates, $with");
+		is( $v2->modify( $X, 'DELETE', 'cn;lang-en', 'y'), 0, "delete value, $with");
+		no_warnings();
+	}
+};
+
+subtest 'extensible match' => sub {
+	my( $v2)= new_dynldif([[ 'schemaLDIF', "$DATA_DIR/schema.ldif" ]]);
+	for( [ '(cn:caseExactMatch:=Test User)', [ $U ] ],
+		[ '(cn:caseExactMatch:=test user)', [] ],
+		[ '(cn:2.5.13.5:=Test User)', [ $U ], 'rule by OID' ],
+		[ '(cn:=test user)', [ $U ], 'equality rule' ],
+		[ '(ou:dn:=users)', [ "ou=users,$SUFFIX", $U ], 'DN attributes' ],
+		[ '(:dn:caseIgnoreMatch:=users)', [ "ou=users,$SUFFIX", $U ], 'rule without attribute' ],
+		[ '(:dn:2.5.13.2:=users)', [ "ou=users,$SUFFIX", $U ], 'rule by OID without attribute' ],
+	) {
+		my( $f, $expect, $name)= @$_;
+		# (Net::LDAP::Schema's order of definitions varies, so repeated)
+		for( 1.. 2) {
+			my( $v3)= $_== 1 ? $v2 : new_dynldif([[ 'schemaLDIF', "$DATA_DIR/schema.ldif" ]]);
+			my( $ret, $dns)= search_dns( $v3, $SUFFIX, filter => $f);
+			is_deeply( $dns, $expect, $name || $f);
+		}
+	}
+	no_warnings();
+};
+
 subtest 'size limit' => sub {
 	my( $ret, $dns);
 	( $ret, $dns)= search_dns( $v, $SUFFIX, size => 2);

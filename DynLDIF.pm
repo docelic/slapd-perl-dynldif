@@ -1288,11 +1288,13 @@ sub modify {
 sub matching_values {
 	my( $this, $attr, $assertion, @values)= @_;
 
+	# (Matching rules are those of the attribute type, without options)
+	( my $type= $attr)=~ s/;.*//;
 	my $filter= Net::LDAP::Filter->new(
-		"($attr=". escape_filter_value( $assertion). ')') or return;
+		"($type=". escape_filter_value( $assertion). ')') or return;
 
 	grep {
-		my $e= Net::LDAP::Entry->new( 'cn=x', $attr=> $values[$_]);
+		my $e= Net::LDAP::Entry->new( 'cn=x', $type=> $values[$_]);
 		$filter->match( $e, $this->{match_schema})
 	} 0.. $#values
 }
@@ -2536,8 +2538,20 @@ sub leaf_match {
 	return $entry->exists( $args) ? 1 : 0 if $op eq 'present';
 
 	# Others (extensibleMatch) are rare
-	return Net::LDAP::Filter::match( { $op=> $args}, $entry, $this->{match_schema})
-		unless $op eq 'approxMatch' or $OP2RULE{$op};
+	unless( $op eq 'approxMatch' or $OP2RULE{$op}) {
+		my $schema= $this->{match_schema};
+		# Matching rule is passed by name. (Net::LDAP::Schema finds matching
+		# rule use only by name, and a rule's OID can refer to its use instead.)
+		if( $schema and defined( my $id= $args->{matchingRule})) {
+			my $name= $this->{rule_cache}{"mr:$id"}//= do {
+				my( $mr)= grep { $_->{oid} eq $id or lc $_->{name} eq lc $id}
+					$schema->all_matchingrules;
+				$mr ? $mr->{name} : $id
+			};
+			$args= { %$args, matchingRule=> $name};
+		}
+		return Net::LDAP::Filter::match( { $op=> $args}, $entry, $schema)
+	}
 
 	my( $attr, $assertion);
 	if( $op eq 'substrings') {
@@ -2553,8 +2567,10 @@ sub leaf_match {
 	my $schema= $this->{match_schema};
 	my $rule= 'cis_'. $op;
 	if( $schema and $op ne 'approxMatch') {
-		my $cache= $this->{rule_cache}{ lc $attr}||= {};
-		$cache->{$op}= $schema->matchingrule_for_attribute( $attr, $OP2RULE{$op})
+		# (Matching rules are those of the attribute type, without options)
+		( my $type= lc $attr)=~ s/;.*//;
+		my $cache= $this->{rule_cache}{$type}||= {};
+		$cache->{$op}= $schema->matchingrule_for_attribute( $type, $OP2RULE{$op})
 			unless exists $cache->{$op};
 		$rule= $cache->{$op};
 		return undef unless defined $rule;
@@ -3760,16 +3776,34 @@ for my $op( qw/config init search add modify delete modrdn compare bind/) {
 }
 
 # Entry, as seen by Net::LDAP::FilterMatch in filter_match(): values that
-# are valid UTF-8 are decoded into characters
+# are valid UTF-8 are decoded into characters, and values of an attribute
+# description include those of its subtypes with options (i.e. 'cn' those
+# of 'cn;lang-en', RFC 4512 2.5.2).
 package DynLDIF::CharEntry;
 
 sub new    { my( $class, $entry)= @_; bless { entry=> $entry}, $class }
-sub exists { $_[0]{entry}->exists( $_[1]) }
+sub exists { scalar( () = $_[0]->raw_values( $_[1])) ? 1 : 0 }
 sub dn     { DynLDIF::decode_utf8_deep( $_[0]{entry}->dn) }
 
 sub get_value {
 	my( $this, $attr)= @_;
-	map { DynLDIF::decode_utf8_deep( $_)} $this->{entry}->get_value( $attr)
+	map { DynLDIF::decode_utf8_deep( $_)} $this->raw_values( $attr)
+}
+
+sub raw_values {
+	my( $this, $attr)= @_;
+	my $entry= $this->{entry};
+
+	# (Usually there are no options in the entry)
+	$this->{options}//= ( List::MoreUtils::any { index( $_, ';')>= 0} $entry->attributes) ? 1 : 0;
+	return $entry->get_value( $attr) unless $this->{options};
+
+	my( $type, @opts)= split /;/, lc $attr;
+	my $all= $entry->get_value( $type, alloptions=> 1) or return;
+	map { @{ $all->{$_}} } grep {
+		my %has= map { lc $_=> 1} split /;/;
+		List::MoreUtils::all { $has{$_}} @opts
+	} sort keys %$all
 }
 
 1
