@@ -638,6 +638,7 @@ sub add {
 
 	my( $ret, $entry)= $this->ldif2e( \$ldif);
 	return $ret unless $ret== LDAP_SUCCESS;
+	return LDAP_PROTOCOL_ERROR unless $entry;
 
 	#
 	# LDIF now as ENTRY, do any changes
@@ -653,6 +654,14 @@ sub add {
 	my $dn= $entry->dn;
 
 	DEBUG and p "ADD '$dn':\n". $this->redact_ldif( $ldif);
+
+	# Entry must have an objectClass and contain its RDN value
+	unless( $this->valid_dn( $dn)) {
+		warn "ADD Invalid or non-normalized DN '$dn'\n";
+		return LDAP_INVALID_DN_SYNTAX
+	}
+	return LDAP_OBJECT_CLASS_VIOLATION unless $entry->exists( 'objectClass');
+	return LDAP_NAMING_VIOLATION unless $this->has_rdn_value( $entry, $dn);
 
 	$ret= $this->save( $dn, $entry);
 	return $ret unless $ret== LDAP_SUCCESS;
