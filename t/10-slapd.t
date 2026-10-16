@@ -402,6 +402,15 @@ subtest 'timestamps' => sub {
 	ok( $r->count> 1, 'can be searched for');
 };
 
+subtest 'hasSubordinates' => sub {
+	my $r= $ldap->search( base => $SUFFIX, scope => 'one', filter => '(objectClass=*)',
+		attrs => [ 'hasSubordinates' ]);
+	my %got= map { ( $_->dn=> $_->get_value( 'hasSubordinates')) } $r->entries;
+	is( $got{"ou=users,$SUFFIX"}, 'TRUE', 'entry with children');
+	$r= $ldap->search( base => $U, scope => 'base', filter => '(objectClass=*)', attrs => [ '+' ]);
+	is( $r->entry( 0)->get_value( 'hasSubordinates'), 'FALSE', 'leaf, with +');
+};
+
 subtest 'bad values are not fatal' => sub {
 	open my $fh, '>', "$dir/data/f.txt" or die;
 	print $fh "x\n";

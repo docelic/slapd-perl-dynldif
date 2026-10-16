@@ -1018,6 +1018,10 @@ sub search {
 	# $as_ldif will be true, otherwise false (implying we want entry objects).
 	my $as_ldif= $this->{level}== 0? 1: 0;
 
+	# hasSubordinates (used by LDAP browsers) is added only when requested
+	my $subordinates= $as_ldif &&
+		any { $_ eq '+' or lc $_ eq 'hassubordinates'} @attrs;
+
 	# First entry is always the base, if -s base or -s sub was specified
 	# for search scope.
 	if( $req{scope}== BASE or $req{scope}== SUB) {
@@ -1036,6 +1040,7 @@ sub search {
 		# in reverse order.
 		if( $this->filter_match( $filter, $entry, 1)) {
 			DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
+			$this->add_subordinates( $entry) if $subordinates;
 			unshift @matches, $as_ldif? $this->e2ldif( $entry->dn, $entry): $entry;
 		}
 
@@ -1091,6 +1096,7 @@ sub search {
 
 							DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
 							# (Entries are converted to LDIF only when they match)
+							$this->add_subordinates( $entry) if $subordinates;
 							unshift @matches, $as_ldif? $this->e2ldif( $entry->dn, $entry): $entry;
 						}
 
@@ -2854,6 +2860,20 @@ sub expand_dots {
 		$$dnref.= ( length $$dnref ? ',' : ''). join ',', @comps[ -$count.. -1]
 			if $count;
 	}
+}
+
+# Set hasSubordinates of entry: whether there are entries below it
+sub add_subordinates {
+	my( $this, $entry)= @_;
+	my( %ret, $has);
+	if( $this->dn2leaf( $entry->dn, \%ret, qw/leaf 0 namesonly 1 verify 1/)== LDAP_SUCCESS
+			and defined $ret{directory} and opendir my $dh, $ret{directory}) {
+		my $ext= $this->{extension};
+		# (Empty files are placeholders, see dn2leaf())
+		$has= any { length> length $ext and substr( $_, -length $ext) eq $ext and
+			-s "$ret{directory}/$_"} readdir $dh;
+	}
+	$entry->replace( hasSubordinates=> $has ? 'TRUE' : 'FALSE');
 }
 
 # Current time in Generalized Time (for createTimestamp and modifyTimestamp)

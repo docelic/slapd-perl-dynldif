@@ -235,6 +235,21 @@ subtest 'corrupt entry files are skipped' => sub {
 	no_warnings();
 };
 
+subtest 'hasSubordinates' => sub {
+	my( $v2)= new_dynldif();
+	$v2->add( "dn: cn=h,ou=hosts,$SUFFIX\nobjectClass: device\ncn: h\n");
+	$v2->delete( "cn=h,ou=hosts,$SUFFIX");
+	my %expect= ( $SUFFIX=> 'TRUE', "ou=users,$SUFFIX"=> 'TRUE', "ou=groups,$SUFFIX"=> 'TRUE',
+		"ou=hosts,$SUFFIX"=> 'FALSE', $U=> 'FALSE', $G=> 'FALSE');
+	for my $attrs( [ '+' ], [ 'hasSubordinates' ], [ 'cn', 'HASSUBORDINATES' ], []) {
+		my( $ret, @ldif)= $v2->search( $SUFFIX, 2, 0, 0, 0, '(objectClass=*)', 0, @$attrs);
+		my %got= map { my $e= entry_of( $_); ( $e->dn=> scalar $e->get_value( "hasSubordinates")) } @ldif;
+		is_deeply( \%got, @$attrs ? \%expect : { map { $_=> undef} keys %expect },
+			@$attrs ? "requested with '@$attrs'" : 'not added unless requested');
+	}
+	no_warnings();
+};
+
 subtest 'size limit' => sub {
 	my( $ret, $dns);
 	( $ret, $dns)= search_dns( $v, $SUFFIX, size => 2);

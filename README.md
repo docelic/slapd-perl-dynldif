@@ -695,6 +695,8 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 
 1. Search size and time limits are the ones slapd passes (from the request and from `sizelimit`/`timelimit` and `limits` in `slapd.conf`). When there is no limit, as for the `rootdn`, all entries are returned.
 
+1. The `hasSubordinates` operational attribute (used by LDAP browsers to show which entries can be expanded) is returned when requested, by name or with `+`. It can't be used in filters.
+
 1. COMPARE operation is supported. The entry is loaded with all dynamic values, as it would be returned by SEARCH.
 
 1. DELETE operation is supported, but does not receive an indication from OpenLDAP whether subtree delete was requested or not. Therefore, currently the way to control whether a DELETE will delete whole subtrees or refuse to work on non-leaf values is controlled using the config option `deleteTrees`. If part of a subtree can't be removed, the operation fails and the entry itself is kept.
