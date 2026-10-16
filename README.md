@@ -646,3 +646,19 @@ searchSubst  base        "^ou=\\w+,ou=dhcp$"                \
 1. MODIFY receives modifications from `slapd-perl` as a flat list, without value counts, so a value equal to `ADD`, `DELETE` or `REPLACE` is ambiguous. DynLDIF resolves this using what slapd guarantees about the list, and by checking attribute names against the schema when `schemaLDIF` is configured. Without the schema, a list in which a value equal to an action name is followed by a valid attribute name and further values is read as two modifications. (Resolving this fully would need `slapd-perl` to pass the number of values, which is a change to OpenLDAP.)
 
 1. MODRDN operation is supported for leaf entries, including moving them under a new superior. Like DELETE, it operates on actual entries, not on entries coming from fallbacks.
+
+## Tests
+
+The test suite is in `t/` and is run with `prove`:
+
+```sh
+prove t/
+```
+
+Most tests run DynLDIF directly, without slapd, in temporary data directories.
+`t/10-slapd.t` starts slapd with the DynLDIF backend on a free local port and
+runs LDAP operations against it. It is skipped if slapd, its `back_perl`
+module or the standard schema files are not installed. Their locations can be
+set with the `SLAPD`, `SLAPD_MODULEPATH` and `SLAPD_SCHEMADIR` environment
+variables. Set `KEEP_TMP=1` to keep its temporary directory with the slapd
+config and log.
