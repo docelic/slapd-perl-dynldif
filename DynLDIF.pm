@@ -785,6 +785,8 @@ sub add {
 	}
 	return LDAP_OBJECT_CLASS_VIOLATION unless $entry->exists( 'objectClass');
 	return LDAP_NAMING_VIOLATION unless $this->has_rdn_value( $entry, $dn);
+	return LDAP_TYPE_OR_VALUE_EXISTS
+		if any { $this->has_duplicates( $_, $entry->get_value( $_))} $entry->attributes;
 
 	$ret= $this->save( $dn, $entry);
 	return $ret unless $ret== LDAP_SUCCESS;
@@ -1150,6 +1152,12 @@ sub modify {
 			}
 		}
 
+		# Values in the request must be distinct
+		if( $action ne 'delete' and $this->has_duplicates( $key, @values)) {
+			p "MODIFY: duplicate values of '$key' for '$dn'";
+			return LDAP_TYPE_OR_VALUE_EXISTS
+		}
+
 		if( $action eq 'add') {
 			# Values must not exist already
 			for my $value( @values) {
@@ -1181,6 +1189,9 @@ sub modify {
 			else         { $entry->delete( $key) }
 		}
 	}
+
+	# objectClass can't be removed
+	return LDAP_OBJECT_CLASS_VIOLATION unless $entry->exists( 'objectClass');
 
 	# RDN value can't be removed
 	if( $this->has_rdn_value( $orig, $dn) and !$this->has_rdn_value( $entry, $dn)) {
@@ -1246,6 +1257,28 @@ sub matching_values {
 		my $e= Net::LDAP::Entry->new( 'cn=x', $attr=> $values[$_]);
 		$filter->match( $e, $this->{match_schema})
 	} 0.. $#values
+}
+
+# Whether some of @values are equal, according to the equality matching
+# rule of $attr
+sub has_duplicates {
+	my( $this, $attr, @values)= @_;
+
+	# Values are first grouped by a key that is the same for values equal
+	# by any of the matching rules (case, spaces and hyphens, and leading
+	# zeros don't matter), and only values within a group are compared.
+	my %groups;
+	for( @values) {
+		( my $k= lc)=~ s/[\s-]+//g;
+		$k=~ s/(?<!\d)0+(?=\d)//g;
+		push @{ $groups{$k}}, $_;
+	}
+	for my $group( grep { @$_> 1} values %groups) {
+		for my $i( 0.. $#$group- 1) {
+			return 1 if $this->matching_values( $attr, $group->[$i], @$group[ $i+ 1.. $#$group]);
+		}
+	}
+	0
 }
 
 # Does entry contain the RDN value of (normalized) $dn?

@@ -9,7 +9,7 @@ use DynLDIFTest;
 use MIME::Base64 qw/encode_base64/;
 use Encode qw//;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_ALREADY_EXISTS LDAP_NO_SUCH_OBJECT
-	LDAP_INVALID_DN_SYNTAX LDAP_NOT_ALLOWED_ON_NONLEAF LDAP_OBJECT_CLASS_VIOLATION
+	LDAP_INVALID_DN_SYNTAX LDAP_NOT_ALLOWED_ON_NONLEAF LDAP_OBJECT_CLASS_VIOLATION LDAP_TYPE_OR_VALUE_EXISTS
 	LDAP_NAMING_VIOLATION LDAP_PROTOCOL_ERROR/;
 
 my $host= "dn: cn=h1,ou=hosts,$SUFFIX\nobjectClass: device\ncn: h1\n";
@@ -50,6 +50,8 @@ subtest 'entry validation' => sub {
 	add_ok( $v, "dn: cn=a,=b,ou=hosts,$SUFFIX\ncn: other\n",
 		LDAP_INVALID_DN_SYNTAX, 'DN syntax checked first');
 	warnings_like( qr/Invalid or non-normalized DN/);
+	add_ok( $v, "dn: cn=d,ou=hosts,$SUFFIX\nobjectClass: device\ncn: d\nl: a\nl: A\n",
+		LDAP_TYPE_OR_VALUE_EXISTS, 'duplicate values');
 	is( $v->add( ''), LDAP_PROTOCOL_ERROR, 'no entry');
 	ok( !-e data_file( $dir, "cn=x,ou=hosts,$SUFFIX"), 'nothing stored');
 	no_warnings();

@@ -13,7 +13,8 @@ use Test::More;
 use DynLDIFTest;
 use File::Find qw//;
 use Net::LDAP::Constant qw/LDAP_SUCCESS LDAP_NO_SUCH_OBJECT LDAP_OPERATIONS_ERROR
-	LDAP_TYPE_OR_VALUE_EXISTS LDAP_NO_SUCH_ATTRIBUTE LDAP_NOT_ALLOWED_ON_RDN/;
+	LDAP_TYPE_OR_VALUE_EXISTS LDAP_NO_SUCH_ATTRIBUTE LDAP_NOT_ALLOWED_ON_RDN
+	LDAP_OBJECT_CLASS_VIOLATION/;
 
 my $U= "uid=testuser,ou=users,$SUFFIX";
 
@@ -88,6 +89,18 @@ subtest 'result codes' => sub {
 	is( $v->modify( $U, 'REPLACE', 'uid', 'TestUser', 'third'), LDAP_SUCCESS,
 		'replace keeping RDN value');
 	is_deeply( [ get( $v, $U)->get_value( 'uid') ], [ 'TestUser', 'third' ]);
+
+	is( $v->modify( $U, 'DELETE', 'objectClass', undef), LDAP_OBJECT_CLASS_VIOLATION,
+		'objectClass can not be removed');
+	is( $v->modify( $U, 'DELETE', 'objectClass', qw/person inetOrgPerson organizationalPerson posixAccount/),
+		LDAP_OBJECT_CLASS_VIOLATION, 'nor all of its values');
+	is( $v->modify( $U, 'REPLACE', 'description', 'a', 'b', 'A'), LDAP_TYPE_OR_VALUE_EXISTS,
+		'duplicate values in REPLACE');
+	is( $v->modify( $U, 'ADD', 'description', 'a', 'A'), LDAP_TYPE_OR_VALUE_EXISTS,
+		'duplicate values in ADD');
+	ok( !get( $v, $U)->exists( 'description'), 'nothing applied');
+	is( $v->modify( $U, 'ADD', 'description', map { "value $_" } 1.. 2000), LDAP_SUCCESS,
+		'many distinct values');
 	no_warnings();
 };
 
@@ -116,6 +129,8 @@ subtest 'equality rules from schema' => sub {
 		'value differing in case is a different value');
 	is( $v->modify( $U, 'ADD', 'cn', 'TEST USER'), LDAP_TYPE_OR_VALUE_EXISTS,
 		'case-insensitive attribute');
+	is( $v->modify( $U, 'REPLACE', 'homeDirectory', '/a', '/A'), LDAP_SUCCESS,
+		'values differing in case are distinct for case-exact attributes');
 	no_warnings();
 };
 
