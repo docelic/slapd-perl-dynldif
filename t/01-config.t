@@ -110,6 +110,48 @@ subtest 'clean' => sub {
 	no_warnings();
 };
 
+subtest 'invalid values' => sub {
+	my $v2= DynLDIF->new;
+	is( $v2->config( 'message', '[${nosuch}] [%{nosuch}] [%{var}]'), LDAP_SUCCESS);
+	warnings_like( qr/^Undefined variable '\$\{nosuch\}'/);
+	warnings_like( qr/^Unknown directive '%\{nosuch\}'/);
+	warnings_like( qr/^Unknown directive '%\{var\}'/, 'non-scalar directive');
+	warnings_like( qr/^Message: \[\] \[\] \[\]/, 'expanded to empty values');
+
+	for my $line( [ 'save', 'x' ], [ 'load', 'x' ], [ 'saveDump', 'x' ], [ 'loadDump', 'x' ]) {
+		is( $v2->config( @$line), LDAP_OPERATIONS_ERROR, "$line->[0] before directory");
+		warnings_like( qr/before 'directory' has been set/);
+	}
+
+	is( $v->config( 'loadDump', 'nosuch'), LDAP_OPERATIONS_ERROR, 'missing dump');
+	warnings_like( qr/^Can't load dump/);
+
+	is( $v2->config( 'cacheRead', 'abc'), LDAP_PARAM_ERROR, 'invalid cacheRead');
+	is( $v2->config( 'cacheRead', '1o'), LDAP_PARAM_ERROR, 'invalid cacheRead');
+	warnings_like( qr/^Invalid cache value 'abc'/);
+	warnings_like( qr/^Invalid cache value '1o'/);
+	is( $v2->config( 'cacheRead', 0), LDAP_SUCCESS, 'cacheRead 0');
+	is( $v2->config( 'cacheRead', 5), LDAP_SUCCESS, 'cacheRead 5');
+
+	for my $line(
+		[ 'searchFallback', '(', 'x' ],
+		[ 'searchSubst', 'base', '[', '->', 'base', '.+', 'y' ],
+		[ 'searchSubst', 'base', 'x', '->', 'base', '(', 'y' ],
+		[ 'entryAppend', 'objectClass', '*x', '->', 'append', '.+', 'y' ],
+		[ 'entryAppend', 'objectClass', 'x', '->', 'append', '+', 'y' ],
+		[ 'addRelocate', 'Site', '(', 'y' ],
+		[ 'addPrompt', '(', 'x', 'y' ],
+		[ 'expandVal', '(', '^$' ],
+		[ 'findVal', '.', ')' ],
+	) {
+		is( $v2->config( @$line), LDAP_PARAM_ERROR, "invalid regex in @$line");
+		warnings_like( qr/^Invalid regex/);
+	}
+	is( $v2->config( 'searchSubst', 'base', '^(x)$', '->', 'base', '$[0][0]', 'y'),
+		LDAP_SUCCESS, 'references to captures are accepted');
+	no_warnings();
+};
+
 subtest 'unusable directory' => sub {
 	# A file where the directory should be: mkdir fails even as root
 	open my $fh, '>', "$dir/afile" or die;

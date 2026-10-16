@@ -473,13 +473,30 @@ sub config {
 			# ${var} expands to variables, %{directive} to values of
 			# scalar config directives.
 			if( $this->{parse}) {
-				s/\$\{(\S+?)\}/$$this{var}{$1}[0]/g;
-				s/\%\{(\S+?)\}/$$this{$1}/g;
+				s/\$\{(\S+?)\}/$this->expand_var( $1)/ge;
+				s/\%\{(\S+?)\}/$this->expand_directive( $1)/ge;
 			}
 		}
 
 		# Very simple: if we know about this key, allow it. If not, throw a fit.
 		unless( defined $this->{$key}) {
+			return LDAP_PARAM_ERROR
+		}
+
+		# Directives that work with files in $directory/tmp/
+		if( !$this->{tmpdir} and (
+				( $key=~ /^(?:save|load)$/ and $this->{enablestack}) or
+				( $key=~ /^(?:savedump|loaddump)$/ and $this->{enabledump}))) {
+			warn "Called '$key' before 'directory' has been set\n";
+			return LDAP_OPERATIONS_ERROR
+		}
+
+		# Regexes are compiled here, so that invalid ones are reported now,
+		# and not when they are used
+		for my $re( $this->config_regexes( $key, @val)) {
+			next if eval { qr/$re/; 1 };
+			( my $err= $@)=~ s/ at \S+ line \d+.*//s;
+			warn "Invalid regex '$re' in '$key' ($err)\n";
 			return LDAP_PARAM_ERROR
 		}
 
@@ -537,7 +554,8 @@ sub config {
 			}
 
 		} elsif( $key eq 'cacheread') {             # DISKREAD CACHE
-			$this->parse_cache_opt( 'read', $val[0])
+			return LDAP_PARAM_ERROR if $val[0] and
+				!defined $this->parse_cache_opt( 'read', $val[0]);
 
 		} elsif( $key eq 'reset' and $this->{enablestack}) {   # RESET STACK
 			$this->{stack}= undef
@@ -628,23 +646,24 @@ sub config {
 			}
 
 		} elsif( $key eq 'savedump' and $this->{enabledump}) { # SAVE DUMP
-			for( $val[0]) {
-				if( not my $ret= nstore $this, $this->{tmpdir}. '/'. $_) {
-					return $ret unless $ret== LDAP_SUCCESS;
-				}
+			my $file= "$this->{tmpdir}/$val[0]";
+			unless( eval { nstore $this, $file }) {
+				( my $err= $@)=~ s/ at \S+ line \d+.*//s;
+				warn "Can't save dump '$file' ($err)\n";
+				return LDAP_OPERATIONS_ERROR
 			}
 
 		} elsif( $key eq 'loaddump' and $this->{enabledump}) { # LOAD DUMP
-			my $ret;
-
-			for( $val[0]) {
-				if( not $ret= retrieve $this->{tmpdir}. '/'. $_) {
-					return $ret unless $ret== LDAP_SUCCESS;
-				}
-
-				# Load all keys into $this and effectively restore state
-				%$this= %{ $ret};
+			my $file= "$this->{tmpdir}/$val[0]";
+			my $dump= eval { retrieve $file };
+			unless( ref $dump eq ref $this) {
+				( my $err= $@ || 'not a dump')=~ s/ at \S+ line \d+.*//s;
+				warn "Can't load dump '$file' ($err)\n";
+				return LDAP_OPERATIONS_ERROR
 			}
+
+			# Load all keys into $this and effectively restore state
+			%$this= %$dump;
 		}
 
 		# Now generic, regular handling of the config keys:
@@ -688,6 +707,51 @@ sub config {
 		}
 
 		LDAP_SUCCESS
+}
+
+# Value of ${NAME} in config lines (see 'var')
+sub expand_var {
+	my( $this, $name)= @_;
+	my $value= $this->{var}{$name};
+	return $value->[0] if $value and defined $value->[0];
+	warn "Undefined variable '\${$name}'\n";
+	q{}
+}
+
+# Value of %{NAME} in config lines (a scalar config directive)
+sub expand_directive {
+	my( $this, $name)= @_;
+	my $value= $this->{ lc $name};
+	return $value if defined $value and !ref $value;
+	warn "Unknown directive '%{$name}' (or not a single value)\n";
+	q{}
+}
+
+# Regexes in a config line
+sub config_regexes {
+	my( $this, $key, @val)= @_;
+
+	return $val[0] if $key eq 'searchfallback';
+	return $val[1] if $key eq 'addrelocate';
+	return @val[0, 1] if $key eq 'addprompt';
+	return grep { defined} @val[0, 1] if $key=~ /^(?:exp|file|find|perl)$/;
+
+	if( $key eq 'entryappend' or $key eq 'searchsubst') {
+		my $arrow= firstidx { $_ eq '->'} @val;
+		return () if $arrow< 0; # (Invalid rules are reported in config())
+		my @re= @val[ grep { $_ % 2} 0.. $arrow- 1]; # Conditions
+		my @action= @val[ $arrow+ 1.. $#val];
+		if( $key eq 'searchsubst') {
+			# KEY PATTERN REPLACEMENT ..., with $[N][M] references to captures
+			push @re, map { s/(?<!\\)\$\[\d+\]\[\d+\]/x/gr }
+				@action[ grep { $_ % 3== 1} 0.. $#action];
+		} elsif( @action and $action[0] eq 'append') {
+			push @re, $action[1];
+		}
+		return grep { defined} @re
+	}
+
+	()
 }
 
 
@@ -3400,6 +3464,11 @@ sub parse_cache_opt {
 	my( $this, $ovl, $n)= @_;
 
 	return if not $n;
+
+	unless( $n=~ /^\d+$/) {
+		warn "Invalid cache value '$n' for '$ovl' (expected a number of operations)\n";
+		return
+	}
 
 	pcd "Parsed cache validity '$n' for ovl $ovl";
 
