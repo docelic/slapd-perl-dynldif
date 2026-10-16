@@ -688,8 +688,11 @@ sub search {
 	# @ATTRS list of attrs to return, special: */null= all, += operational
 
 	# XXX
-	$req{'size'}= 6600 if not $req{'size'} or $req{'size'} eq 'max';
-	$req{'time'}= 6600 if not $req{'time'} or $req{'time'} eq 'max';
+	# slapd passes -1 for no limit (i.e. for rootdn), clients may send 0.
+	for my $limit( qw/size time/) {
+		$req{$limit}= 6600 if not $req{$limit} or $req{$limit} eq 'max' or
+			$req{$limit}< 0;
+	}
 
 	p '-' x 78;
 	my $search = qq|ldapsearch -x -b '$req{base}' -s $SCOPE2NAME{$req{scope}} -a $DEREF2NAME{$req{scope}} -z $req{size} -l $req{time} '$req{filter}' @attrs|;
@@ -770,6 +773,7 @@ sub search {
 	my $filter;
 	unless( $filter= Net::LDAP::Filter->new( $req{filter})) {
 		warn "Invalid filter '$req{filter}'\n";
+		$this->{level}-= 1;
 		return LDAP_FILTER_ERROR
 	}
 
@@ -791,7 +795,7 @@ sub search {
 		# in DN specs (i.e. cn=abc...)
 		( $ret, $newbase, $ldif, $entry)=
 			$this->load( $req{base}, qw/entry 1 ldif 1/, 'origdn', $req{origbase});
-		return $ret unless $ret== LDAP_SUCCESS;
+		if( $ret!= LDAP_SUCCESS) { $this->{level}-= 1; return $ret }
 
 		# If original search base was found, this is a no-op. Otherwise
 		# $newbase is some fallback base found and we "switch" to it.
@@ -802,8 +806,6 @@ sub search {
 		if( $filter->match( $entry)) {
 			DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
 			unshift @matches, $as_ldif? $ldif: $entry;
-
-			goto SIZE_LIMIT if @matches> $req{size};
 		}
 
 		my $time= time;
@@ -815,8 +817,16 @@ sub search {
 	if( $req{scope}!= BASE){
 		my $level= 0;
 
+		# For scopes which do not include the base entry itself, make sure
+		# that the base exists (directly or via fallback) before listing
+		# its children.
+		if( $req{scope}!= SUB) {
+			( $ret, $req{base})= $this->resolve( $req{base}, \%ret, qw/entry 1/);
+			if( $ret!= LDAP_SUCCESS) { $this->{level}-= 1; return $ret }
+		}
+
 		( $ret, $req{base})= $this->resolve( $req{base}, \%ret, qw/leaf 0/);
-		return $ret unless $ret== LDAP_SUCCESS;
+		if( $ret!= LDAP_SUCCESS) { $this->{level}-= 1; return $ret }
 
 		my $dir= $ret{directory};
 		my $md= $S2L{$req{scope}};
@@ -837,10 +847,11 @@ sub search {
 
 					return $ret unless $ret== LDAP_SUCCESS;
 					if( $filter->match( $entry)) {
+						# Size limit is exceeded only when there's a match beyond it
+						goto SIZE_LIMIT if @matches>= $req{size};
+
 						DEBUG and p "SEARCH ($this->{level}) MATCH:", $entry->dn;
 						unshift @matches, $as_ldif? $ldif: $entry;
-
-						goto SIZE_LIMIT if @matches> $req{size};
 					}
 
 					my $time= time;
