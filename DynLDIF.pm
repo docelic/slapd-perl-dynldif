@@ -132,7 +132,8 @@ our %SEARCH_PARAMS= map { $_=> 1} qw/base scope deref size time filter attrOnly/
 # Keys of the instance (see new()) that hold internal state, and are not
 # config directives
 our %INTERNAL= map { $_=> 1} qw/schema tmpdir stack standard_parse level
-	cache op_cache_valid start match_schema rule_cache expanding entry_cache/;
+	cache op_cache_valid start match_schema rule_cache expanding entry_cache
+	protect_memo/;
 
 # Backend instance
 sub new {
@@ -339,6 +340,7 @@ sub init {
 	$this->{match_schema}= ( () = $this->{schema}->all_attributes) ?
 		$this->{schema} : undef;
 	$this->{rule_cache}= {}; # Matching rules of attributes (see leaf_match())
+	$this->{protect_memo}= {}; # Whether attributes are protected (see filter_match())
 
 	# Debconf-related init code
 	if( $this->{enableprompt}) {
@@ -2647,7 +2649,8 @@ sub filter_match {
 		$args->{attributeDesc};
 
 	return undef if defined $attr and lc $attr eq $UNDEFINED_ATTR;
-	return undef if $protect and $this->attr_in( $attr, $this->protected_attrs);
+	return undef if $protect and ( $this->{protect_memo}{ $attr // ''}//=
+		$this->attr_in( $attr, $this->protected_attrs));
 
 	# Leaf components are matched using the matching rules of
 	# Net::LDAP::FilterMatch (undef if no matching rule is available).
@@ -3962,7 +3965,7 @@ sub dn     { DynLDIF::decode_utf8_deep( $_[0]{entry}->dn) }
 
 sub get_value {
 	my( $this, $attr)= @_;
-	map { DynLDIF::decode_utf8_deep( $_)} $this->raw_values( $attr)
+	map { my $c= $_; utf8::decode( $c) ? $c : $_ } $this->raw_values( $attr)
 }
 
 sub raw_values {
